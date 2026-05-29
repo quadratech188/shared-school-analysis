@@ -1,0 +1,20 @@
+# Schools excluded from SAI because required features are missing.
+#
+# Policy:
+# - Missing required features fail the pipeline unless explicitly listed here.
+# - Listed schools are excluded from the analysis cohort, not scored as zero.
+subject_supply_missing:
+  - school: 대전고등학교
+    reason: NEIS timetable raw data has no subject rows for this general high school.
+  - school: 대전노은고등학교
+    reason: NEIS timetable raw data has no subject rows for this general high school.
+  - school: 대전대성고등학교
+    reason: NEIS timetable raw data has no subject rows for this general high school.
+  - school: 대전대신고등학교
+    reason: NEIS timetable raw data has no subject rows for this general high school.
+  - school: 대전송촌고등학교
+    reason: NEIS timetable raw data has no subject rows for this general high school.
+  - school: 대전여자고등학교
+    reason: NEIS timetable raw data has no subject rows for this general high school.
+  - school: 충남고등학교
+    reason: NEIS timetable raw data has no subject rows for this general high school.

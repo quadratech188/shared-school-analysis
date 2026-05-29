@@ -1,0 +1,16 @@
+required:
+  - school_location_20260320.csv
+  - schoolinfo_2025_daejeon_high_student_class.csv
+  - schoolinfo_2025_daejeon_high_teacher.csv
+  - schoolinfo_2025_daejeon_high_school_building.csv
+  - schoolinfo_2025_daejeon_high_support_facilities.csv
+  - public_library_2025_daejeon_filtered.csv
+  - youth_training_facilities_daejeon_filtered.csv
+  - lifelong_education_facilities_daejeon_20260309.csv
+  - daejeon_joint_curriculum_2025_1st.xlsx
+  - daejeon_joint_curriculum_2025_2nd.xlsx
+  - outputs/raw/neis_school_info_raw.csv
+  - outputs/raw/neis_his_timetable_raw.csv
+optional:
+  - school_zone_link_20260320.csv
+  - kess_2025_daejeon_high.xlsx
