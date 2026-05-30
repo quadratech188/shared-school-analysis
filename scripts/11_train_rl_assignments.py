@@ -22,8 +22,12 @@ def make_reward_fn(
     radius_km: float,
 ):
     weak_names = set(weak["학교명"])
+    weak_before = weak["SAI"]
     weak_before_min = float(weak["SAI"].min())
+    weak_before_mean = float(weak["SAI"].mean())
     cache = {}
+    weak_q25_before = float(weak_before.quantile(0.25))
+    weak_bottom3_before = float(weak_before.nsmallest(min(3, len(weak_before))).mean())
 
     def reward(selected: list[dict]) -> float:
         key = selection_key(selected)
@@ -35,6 +39,7 @@ def make_reward_fn(
         sim = simulate_assignments(features, selected, radius_km, offerings)
         weak_sim = sim[sim["학교명"].isin(weak_names)]
         weak_after = weak_sim["SAI_after"]
+        weak_mean_after = weak_after.mean()
         weak_mean_delta = weak_sim["SAI_delta"].mean()
         all_mean_delta = sim["SAI_delta"].mean()
         weak_min_delta = weak_sim["SAI_delta"].min()
@@ -51,12 +56,13 @@ def make_reward_fn(
             avg_distance = radius_km
         value = (
             3.00 * (weak_min_after - weak_before_min)
-            + 1.50 * (weak_q25_after - weak_before_min)
-            + 1.25 * (weak_bottom3_after - weak_before_min)
-            + 0.80 * weak_min_delta
-            + 0.30 * weak_mean_delta
-            + 0.10 * all_mean_delta
-            + 3.00 * weak_improved_ratio
+            + 2.00 * (weak_mean_after - weak_before_mean)
+            + 1.50 * (weak_q25_after - weak_q25_before)
+            + 1.20 * (weak_bottom3_after - weak_bottom3_before)
+            + 0.60 * weak_min_delta
+            + 0.50 * weak_mean_delta
+            + 0.25 * all_mean_delta
+            + 2.00 * weak_improved_ratio
             - 0.05 * avg_distance
         )
         cache[key] = float(value)
@@ -80,6 +86,8 @@ def print_comparison(greedy_sim: pd.DataFrame, rl_sim: pd.DataFrame, weak: pd.Da
         w = sim[sim["학교명"].isin(weak_names)]
         tail_rows.append({
             "algorithm": label,
+            "weak_mean_before": w["SAI_before"].mean(),
+            "weak_mean_after": w["SAI_after"].mean(),
             "weak_min_before": w["SAI_before"].min(),
             "weak_min_after": w["SAI_after"].min(),
             "weak_min_delta": w["SAI_delta"].min(),
@@ -167,6 +175,7 @@ def main() -> None:
     print("\n=== RL Selected Assignments ===")
     print(rl_rows.drop(columns=["algorithm"]).to_string(index=False))
     print_comparison(greedy_sim, rl_sim, weak)
+    weak_rl = rl_sim[rl_sim["학교명"].isin(set(weak["학교명"]))]
     save_before_after_dot_plot(
         rl_sim,
         before_col="SAI_before",
@@ -175,6 +184,10 @@ def main() -> None:
         highlight_labels=set(weak["학교명"]),
         out_path=Path(args.plot_out),
         title="RL assignment policy: SAI before vs after",
+        horizontal_lines=[
+            (weak_rl["SAI_after"].mean(), "weak after mean", "#0f766e"),
+            (weak_rl["SAI_after"].min(), "weak after min", "#dc2626"),
+        ],
     )
     print(f"\nSaved assignments: {args.assignments_out}")
     print(f"Saved simulation: {args.simulation_out}")

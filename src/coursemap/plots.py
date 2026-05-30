@@ -11,6 +11,7 @@ def save_before_after_dot_plot(
     highlight_labels: set[str],
     out_path: Path,
     title: str,
+    horizontal_lines: list[tuple[float, str, str]] | None = None,
 ) -> None:
     import matplotlib.pyplot as plt
 
@@ -22,6 +23,9 @@ def save_before_after_dot_plot(
     lo = min(plot[before_col].min(), plot[after_col].min()) - 2
     hi = max(plot[before_col].max(), plot[after_col].max()) + 2
     ax.plot([lo, hi], [lo, hi], color="#334155", linewidth=1, linestyle="--")
+    for y, label, color in horizontal_lines or []:
+        ax.axhline(y, color=color, linewidth=1.4, linestyle="-", alpha=0.9)
+        ax.text(lo, y, f" {label}: {y:.1f}", color=color, va="bottom", fontsize=8)
     ax.set_xlim(lo, hi)
     ax.set_ylim(lo, hi)
     ax.set_xlabel(before_col)
