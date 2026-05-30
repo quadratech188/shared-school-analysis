@@ -45,6 +45,7 @@ def main() -> None:
     parser.add_argument("--domain-supply", required=True)
     parser.add_argument("--nearby", required=True)
     parser.add_argument("--joint-network", required=True)
+    parser.add_argument("--facility-accessibility")
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
 
@@ -53,6 +54,7 @@ def main() -> None:
     domain_supply = read_csv_smart(Path(args.domain_supply))
     nearby = read_csv_smart(Path(args.nearby))
     joint_network = read_csv_smart(Path(args.joint_network))
+    facility_accessibility = read_csv_smart(Path(args.facility_accessibility)) if args.facility_accessibility else pd.DataFrame()
 
     features = schools.copy()
     features = features.merge(summary, on="학교명", how="left")
@@ -89,8 +91,9 @@ def main() -> None:
     else:
         features["공동망_원"] = 0
 
-    # Placeholder until geocoded public hub accessibility is added.
-    features["공공거점_원"] = 0
+    if not facility_accessibility.empty:
+        features = features.merge(facility_accessibility, on="학교명", how="left")
+        require_no_missing(features, "도서관_최근접km", "facility accessibility")
     # Assignment simulation fills these on demand. Baseline is explicitly zero.
     features["공동수업접근_원"] = 0
     features["공동수업부족계열해소_원"] = 0

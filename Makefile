@@ -11,7 +11,7 @@ REVIEW_DIR := $(BUILD_DIR)/review
 SUBJECT_OVERRIDES := config/subject_overrides.csv
 SUBJECT_IGNORES := config/subject_ignores.csv
 
-.PHONY: all check-inputs clean rebuild
+.PHONY: all check-inputs clean rebuild collect-neis geocode-facilities facility-accessibility recommend-rl
 
 all: \
 	$(INTERIM_DIR)/school_master.csv \
@@ -31,6 +31,18 @@ check-inputs: $(META_DIR)/input_manifest.csv
 
 $(META_DIR)/input_manifest.csv: scripts/00_check_inputs.py config/inputs.yml
 	$(PYTHON) $< --data-dir "$(DATA_DIR)" --out "$@"
+
+$(DATA_DIR)/outputs/raw/neis_school_info_raw.csv $(DATA_DIR)/outputs/raw/neis_his_timetable_raw.csv: \
+	scripts/00_collect_neis_raw.py \
+	src/coursemap/env.py \
+	src/coursemap/io.py
+	$(PYTHON) scripts/00_collect_neis_raw.py \
+		--data-dir "$(DATA_DIR)" \
+		--school-info-out "$(DATA_DIR)/outputs/raw/neis_school_info_raw.csv" \
+		--timetable-out "$(DATA_DIR)/outputs/raw/neis_his_timetable_raw.csv" \
+		--log-out "$(META_DIR)/neis_timetable_collection_log.csv"
+
+collect-neis: $(DATA_DIR)/outputs/raw/neis_school_info_raw.csv $(DATA_DIR)/outputs/raw/neis_his_timetable_raw.csv
 
 $(INTERIM_DIR)/school_master.csv: \
 	scripts/01_prepare_school_master.py \
@@ -90,6 +102,33 @@ $(INTERIM_DIR)/facilities.csv: \
 	$(DATA_DIR)/youth_training_facilities_daejeon_filtered.csv \
 	$(DATA_DIR)/lifelong_education_facilities_daejeon_20260309.csv
 	$(PYTHON) $< --data-dir "$(DATA_DIR)" --out "$@"
+
+$(INTERIM_DIR)/facilities_geocoded.csv: \
+	scripts/04_geocode_facilities.py \
+	src/coursemap/geocode.py \
+	src/coursemap/io.py \
+	$(INTERIM_DIR)/facilities.csv
+	$(PYTHON) $< --facilities "$(INTERIM_DIR)/facilities.csv" \
+		--data-dir "$(DATA_DIR)" \
+		--out "$@" \
+		--log-out "$(BUILD_DIR)/metadata/geocoding_log.csv"
+
+$(PROCESSED_DIR)/facility_accessibility.csv: \
+	scripts/05_build_facility_accessibility.py \
+	src/coursemap/geo.py \
+	src/coursemap/io.py \
+	$(INTERIM_DIR)/analysis_schools.csv \
+	$(INTERIM_DIR)/facilities_geocoded.csv
+	$(PYTHON) $< --schools "$(INTERIM_DIR)/analysis_schools.csv" \
+		--facilities "$(INTERIM_DIR)/facilities_geocoded.csv" \
+		--out "$@"
+
+geocode-facilities: $(INTERIM_DIR)/facilities_geocoded.csv
+
+facility-accessibility: $(PROCESSED_DIR)/facility_accessibility.csv
+
+recommend-rl: $(BUILD_DIR)/tables/school_sai_result.csv
+	$(PYTHON) scripts/11_train_rl_assignments.py
 
 $(INTERIM_DIR)/joint_curriculum.csv: \
 	scripts/04_prepare_joint_curriculum.py \

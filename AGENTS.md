@@ -35,6 +35,21 @@ make subject-review-list
 make review-subjects
 ```
 
+Build Kakao-geocoded public hub accessibility, after adding
+`KAKAO_REST_API_KEY=...` to `.env`:
+
+```bash
+make geocode-facilities
+make facility-accessibility
+```
+
+Train the reinforcement-learning assignment policy and compare it with the
+greedy baseline:
+
+```bash
+make recommend-rl
+```
+
 Clean and rebuild generated artifacts:
 
 ```bash

@@ -1,0 +1,47 @@
+﻿학교명,_norm_name,has_subject_supply,blacklisted,include_in_analysis,status,reason
+남대전고등학교,남대전고,True,False,True,ok,
+대덕고등학교,대덕고,True,False,True,ok,
+대전가오고등학교,대전가오고,True,False,True,ok,
+대전고등학교,대전고,True,True,False,blacklist_stale_feature_present,NEIS timetable raw data has no subject rows for this general high school.
+대전관저고등학교,대전관저고,True,False,True,ok,
+대전괴정고등학교,대전괴정고,True,False,True,ok,
+대전구봉고등학교,대전구봉고,True,False,True,ok,
+대전노은고등학교,대전노은고,True,True,False,blacklist_stale_feature_present,NEIS timetable raw data has no subject rows for this general high school.
+대전대성고등학교,대전대성고,True,True,False,blacklist_stale_feature_present,NEIS timetable raw data has no subject rows for this general high school.
+대전대신고등학교,대전대신고,True,True,False,blacklist_stale_feature_present,NEIS timetable raw data has no subject rows for this general high school.
+대전도안고등학교,대전도안고,True,False,True,ok,
+대전동산고등학교,대전동산고,True,False,True,ok,
+대전둔산여자고등학교,대전둔산여자고,True,False,True,ok,
+대전둔원고등학교,대전둔원고,True,False,True,ok,
+대전만년고등학교,대전만년고,True,False,True,ok,
+대전반석고등학교,대전반석고,True,False,True,ok,
+대전복수고등학교,대전복수고,True,False,True,ok,
+대전성모여자고등학교,대전성모여자고,True,False,True,ok,
+대전송촌고등학교,대전송촌고,True,True,False,blacklist_stale_feature_present,NEIS timetable raw data has no subject rows for this general high school.
+대전여자고등학교,대전여자고,True,True,False,blacklist_stale_feature_present,NEIS timetable raw data has no subject rows for this general high school.
+대전예술고등학교,대전예술고,True,False,True,ok,
+대전용산고등학교,대전용산고,True,False,True,ok,
+대전이문고등학교,대전이문고,True,False,True,ok,
+대전전민고등학교,대전전민고,True,False,True,ok,
+대전제일고등학교,대전제일고,True,False,True,ok,
+대전중앙고등학교,대전중앙고,True,False,True,ok,
+대전지족고등학교,대전지족고,True,False,True,ok,
+대전한빛고등학교,대전한빛고,True,False,True,ok,
+동대전고등학교,동대전고,True,False,True,ok,
+동방고등학교,동방고,True,False,True,ok,
+명석고등학교,명석고,True,False,True,ok,
+보문고등학교,보문고,True,False,True,ok,
+서대전고등학교,서대전고,True,False,True,ok,
+서대전여자고등학교,서대전여자고,True,False,True,ok,
+서일고등학교,서일고,True,False,True,ok,
+서일여자고등학교,서일여자고,True,False,True,ok,
+신탄진고등학교,신탄진고,True,False,True,ok,
+우송고등학교,우송고,True,False,True,ok,
+유성고등학교,유성고,True,False,True,ok,
+유성여자고등학교,유성여자고,True,False,True,ok,
+중일고등학교,중일고,True,False,True,ok,
+청란여자고등학교,청란여자고,True,False,True,ok,
+충남고등학교,충남고,True,True,False,blacklist_stale_feature_present,NEIS timetable raw data has no subject rows for this general high school.
+충남여자고등학교,충남여자고,True,False,True,ok,
+한밭고등학교,한밭고,True,False,True,ok,
+호수돈여자고등학교,호수돈여자고,True,False,True,ok,

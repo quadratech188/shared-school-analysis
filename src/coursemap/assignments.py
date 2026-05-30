@@ -51,6 +51,7 @@ def build_candidates(
                         "school": school_name,
                         "domain": domain,
                         "distance_km": distance,
+                        "sai_before": float(school["SAI"]),
                         "weight": vulnerability * distance_weight,
                     })
             if covered:
