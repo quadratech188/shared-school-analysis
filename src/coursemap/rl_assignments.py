@@ -42,28 +42,28 @@ def materialize_selection(selected: list[dict]) -> list[dict]:
     covered_pairs = set()
     out = []
     for item in selected:
-        marginal = [x for x in item["covered"] if (x["school"], x["domain"]) not in covered_pairs]
+        marginal = [x for x in item["covered"] if (x["school"], x.get("subject", x["domain"])) not in covered_pairs]
         if not marginal:
             continue
         gain = sum(x["weight"] for x in marginal) - item.get("duplicate_ratio", 0) * 0.2
         enriched = {**item, "marginal": marginal, "gain": gain}
         out.append(enriched)
-        covered_pairs |= {(x["school"], x["domain"]) for x in marginal}
+        covered_pairs |= {(x["school"], x.get("subject", x["domain"])) for x in marginal}
     return out
 
 
 def available_candidates(candidates: list[dict], selected: list[dict]) -> list[dict]:
-    used = {(x["hub"], x["domain"]) for x in selected}
+    used = {(x["hub"], x.get("subject", x["domain"])) for x in selected}
     covered = {
-        (x["school"], x["domain"])
+        (x["school"], x.get("subject", x["domain"]))
         for item in materialize_selection(selected)
         for x in item["marginal"]
     }
     out = []
     for cand in candidates:
-        if (cand["hub"], cand["domain"]) in used:
+        if (cand["hub"], cand.get("subject", cand["domain"])) in used:
             continue
-        marginal = [x for x in cand["covered"] if (x["school"], x["domain"]) not in covered]
+        marginal = [x for x in cand["covered"] if (x["school"], x.get("subject", x["domain"])) not in covered]
         if marginal:
             out.append({**cand, "marginal": marginal})
     return out

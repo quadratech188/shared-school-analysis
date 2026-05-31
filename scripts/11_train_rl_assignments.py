@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 
 from coursemap.assignment_reporting import assignment_rows, existing_pairs, load_domain_matrix, summarize_sai
-from coursemap.assignments import build_candidates, domain_shortage_pairs, greedy_select, simulate_assignments
+from coursemap.assignments import build_candidates, domain_shortage_pairs, greedy_select, school_subject_sets, simulate_assignments, subject_catalog
 from coursemap.io import read_csv_smart, write_csv
 from coursemap.plots import save_before_after_dot_plot
 from coursemap.rl_assignments import PolicyConfig, train_policy
@@ -12,7 +12,7 @@ from coursemap.sai import regular_offerings
 
 
 def selection_key(selected: list[dict]) -> tuple[tuple[str, str], ...]:
-    return tuple((x["hub"], x["domain"]) for x in selected)
+    return tuple((x["hub"], x.get("subject", x["domain"])) for x in selected)
 
 
 def make_reward_fn(
@@ -120,6 +120,7 @@ def main() -> None:
     parser.add_argument("--budget", type=int, default=10)
     parser.add_argument("--radius-km", type=float, default=5.0)
     parser.add_argument("--weak-quantile", type=float, default=0.4)
+    parser.add_argument("--max-subjects-per-domain", type=int, default=8)
     parser.add_argument("--episodes", type=int, default=300)
     parser.add_argument("--learning-rate", type=float, default=0.003)
     parser.add_argument("--entropy-weight", type=float, default=0.03)
@@ -136,7 +137,15 @@ def main() -> None:
     offerings = regular_offerings(read_csv_smart(Path(args.neis_subjects)))
     domain_matrix = load_domain_matrix(Path(args.domain_supply))
     weak, shortage_pairs = domain_shortage_pairs(sai, domain_matrix, args.weak_quantile)
-    candidates = build_candidates(features, weak, shortage_pairs, existing_pairs(Path(args.joint_network)), args.radius_km)
+    candidates = build_candidates(
+        features,
+        weak,
+        shortage_pairs,
+        existing_pairs(Path(args.joint_network)),
+        args.radius_km,
+        subjects_by_domain=subject_catalog(offerings, args.max_subjects_per_domain),
+        existing_school_subjects=school_subject_sets(offerings),
+    )
     if not candidates:
         raise SystemExit("no assignment candidates")
 

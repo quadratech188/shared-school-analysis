@@ -43,7 +43,7 @@ The assignment problem is modeled as sequential decision-making.
 - State: current candidate set, already covered school-domain pairs, weak-school
   SAI profile, distance coverage, and duplicate assignment pressure.
 - Action: choose one joint-course assignment candidate, currently
-  `(hub school, domain)`.
+  `(hub school, subject, domain)`.
 - Episode: select up to the assignment budget.
 - Reward: compute post-assignment SAI and score the result.
 
@@ -88,7 +88,6 @@ SAI so that fairness gains are visually explicit.
 
 Planned algorithm improvements:
 
-- expand actions from `(hub, domain)` to `(hub, subject)`
 - add hub capacity and school participation constraints
 - add a fairness-greedy baseline
 - include geocoded public hub accessibility in candidate features

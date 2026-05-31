@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 
 from coursemap.assignment_reporting import assignment_rows, existing_pairs, load_domain_matrix, summarize_sai
-from coursemap.assignments import build_candidates, domain_shortage_pairs, greedy_select, simulate_assignments
+from coursemap.assignments import build_candidates, domain_shortage_pairs, greedy_select, school_subject_sets, simulate_assignments, subject_catalog
 from coursemap.io import read_csv_smart
 from coursemap.plots import save_before_after_dot_plot
 from coursemap.sai import regular_offerings
@@ -12,13 +12,16 @@ from coursemap.sai import regular_offerings
 
 def print_coverage_summary(selected: list[dict], weak: pd.DataFrame, shortage_pairs: set[tuple[str, str]]) -> None:
     covered_pairs = set()
+    covered_subject_pairs = set()
     covered_schools = set()
     domain_counts = {}
     for item in selected:
         pairs = {(x["school"], x["domain"]) for x in item["marginal"]}
+        subject_pairs = {(x["school"], x.get("subject", item.get("subject", x["domain"]))) for x in item["marginal"]}
         covered_pairs |= pairs
+        covered_subject_pairs |= subject_pairs
         covered_schools |= {x["school"] for x in item["marginal"]}
-        domain_counts[item["domain"]] = domain_counts.get(item["domain"], 0) + len(pairs)
+        domain_counts[item["domain"]] = len({p for p in covered_pairs if p[1] == item["domain"]})
 
     total_pairs = len(shortage_pairs)
     print("\n=== Budgeted Maximum Coverage Summary ===")
@@ -26,6 +29,7 @@ def print_coverage_summary(selected: list[dict], weak: pd.DataFrame, shortage_pa
     print(f"weak_schools: {len(weak)}")
     print(f"shortage_school_domain_pairs: {total_pairs}")
     print(f"covered_school_domain_pairs: {len(covered_pairs)} ({len(covered_pairs) / max(total_pairs, 1) * 100:.1f}%)")
+    print(f"covered_school_subject_pairs: {len(covered_subject_pairs)}")
     print(f"covered_weak_schools: {len(covered_schools)} ({len(covered_schools) / max(len(weak), 1) * 100:.1f}%)")
     print("covered_pairs_by_domain:", domain_counts)
     print("\n=== Selected Assignments ===")
@@ -55,6 +59,7 @@ def main() -> None:
     parser.add_argument("--budget", type=int, default=10)
     parser.add_argument("--radius-km", type=float, default=5.0)
     parser.add_argument("--weak-quantile", type=float, default=0.4)
+    parser.add_argument("--max-subjects-per-domain", type=int, default=8)
     args = parser.parse_args()
 
     features = read_csv_smart(Path(args.features))
@@ -62,7 +67,15 @@ def main() -> None:
     offerings = regular_offerings(read_csv_smart(Path(args.neis_subjects)))
     domain_matrix = load_domain_matrix(Path(args.domain_supply))
     weak, shortage_pairs = domain_shortage_pairs(sai, domain_matrix, args.weak_quantile)
-    candidates = build_candidates(features, weak, shortage_pairs, existing_pairs(Path(args.joint_network)), args.radius_km)
+    candidates = build_candidates(
+        features,
+        weak,
+        shortage_pairs,
+        existing_pairs(Path(args.joint_network)),
+        args.radius_km,
+        subjects_by_domain=subject_catalog(offerings, args.max_subjects_per_domain),
+        existing_school_subjects=school_subject_sets(offerings),
+    )
     selected = greedy_select(candidates, args.budget)
 
     print_coverage_summary(selected, weak, shortage_pairs)

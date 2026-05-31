@@ -7,6 +7,28 @@ from coursemap.sai import assignment_offerings, combine_offerings, compute_sai
 DEFAULT_DOMAINS = ["정보·AI", "자연·공학", "진로·융합", "제2외국어·국제", "인문·사회", "예체능"]
 
 
+def subject_catalog(offerings: pd.DataFrame, max_subjects_per_domain: int = 8) -> dict[str, list[str]]:
+    required = {"subject", "domain", "school"}
+    missing = required - set(offerings.columns)
+    if missing:
+        raise ValueError(f"offerings missing columns for subject catalog: {sorted(missing)}")
+    counts = (
+        offerings[offerings["domain"].isin(DEFAULT_DOMAINS)]
+        .groupby(["domain", "subject"])["school"]
+        .nunique()
+        .reset_index(name="school_count")
+        .sort_values(["domain", "school_count", "subject"], ascending=[True, False, True])
+    )
+    catalog = {}
+    for domain, group in counts.groupby("domain"):
+        catalog[domain] = group["subject"].head(max_subjects_per_domain).tolist()
+    return catalog
+
+
+def school_subject_sets(offerings: pd.DataFrame) -> dict[str, set[str]]:
+    return offerings.groupby("school")["subject"].apply(lambda s: set(s.astype(str))).to_dict()
+
+
 def domain_shortage_pairs(sai: pd.DataFrame, domain_matrix: pd.DataFrame, weak_quantile: float) -> tuple[pd.DataFrame, set[tuple[str, str]]]:
     threshold = sai["SAI"].quantile(weak_quantile)
     weak = sai[sai["SAI"] <= threshold].copy()
@@ -28,56 +50,65 @@ def build_candidates(
     shortage_pairs: set[tuple[str, str]],
     existing: set[tuple[str, str]],
     radius_km: float,
+    subjects_by_domain: dict[str, list[str]] | None = None,
+    existing_school_subjects: dict[str, set[str]] | None = None,
 ) -> list[dict]:
     candidates = []
     weak_by_name = weak.set_index("학교명")
     norm_by_name = schools.set_index("학교명")["_norm_name"].to_dict()
+    subjects_by_domain = subjects_by_domain or {domain: [f"공동수업:{domain}"] for domain in DEFAULT_DOMAINS}
+    existing_school_subjects = existing_school_subjects or {}
     for _, hub in schools.iterrows():
         if pd.isna(hub["위도"]) or pd.isna(hub["경도"]):
             continue
         for domain in DEFAULT_DOMAINS:
-            covered = []
-            for school_name, pair_domain in shortage_pairs:
-                if pair_domain != domain or school_name not in weak_by_name.index:
-                    continue
-                school = weak_by_name.loc[school_name]
-                if pd.isna(school["위도"]) or pd.isna(school["경도"]):
-                    continue
-                distance = haversine_km(hub["위도"], hub["경도"], school["위도"], school["경도"])
-                if distance <= radius_km:
-                    vulnerability = max(0.1, 100 - float(school["SAI"])) / 100
-                    distance_weight = max(0.3, (radius_km - distance) / radius_km)
-                    covered.append({
-                        "school": school_name,
+            for subject in subjects_by_domain.get(domain, []):
+                covered = []
+                for school_name, pair_domain in shortage_pairs:
+                    if pair_domain != domain or school_name not in weak_by_name.index:
+                        continue
+                    if subject in existing_school_subjects.get(school_name, set()):
+                        continue
+                    school = weak_by_name.loc[school_name]
+                    if pd.isna(school["위도"]) or pd.isna(school["경도"]):
+                        continue
+                    distance = haversine_km(hub["위도"], hub["경도"], school["위도"], school["경도"])
+                    if distance <= radius_km:
+                        vulnerability = max(0.1, 100 - float(school["SAI"])) / 100
+                        distance_weight = max(0.3, (radius_km - distance) / radius_km)
+                        covered.append({
+                            "school": school_name,
+                            "domain": domain,
+                            "subject": subject,
+                            "distance_km": distance,
+                            "sai_before": float(school["SAI"]),
+                            "weight": vulnerability * distance_weight,
+                        })
+                if covered:
+                    duplicate = sum(1 for item in covered if (norm_by_name.get(item["school"], ""), domain) in existing)
+                    candidates.append({
+                        "hub": hub["학교명"],
+                        "hub_norm": hub["_norm_name"],
                         "domain": domain,
-                        "distance_km": distance,
-                        "sai_before": float(school["SAI"]),
-                        "weight": vulnerability * distance_weight,
+                        "subject": subject,
+                        "covered": covered,
+                        "duplicate_ratio": duplicate / len(covered),
                     })
-            if covered:
-                duplicate = sum(1 for item in covered if (norm_by_name.get(item["school"], ""), domain) in existing)
-                candidates.append({
-                    "hub": hub["학교명"],
-                    "hub_norm": hub["_norm_name"],
-                    "domain": domain,
-                    "covered": covered,
-                    "duplicate_ratio": duplicate / len(covered),
-                })
     return candidates
 
 
 def greedy_select(candidates: list[dict], budget: int) -> list[dict]:
     selected = []
     covered_pairs = set()
-    used_hub_domains = set()
+    used_hub_subjects = set()
     for _ in range(budget):
         best = None
         best_gain = 0
         for cand in candidates:
-            key = (cand["hub"], cand["domain"])
-            if key in used_hub_domains:
+            key = (cand["hub"], cand.get("subject", cand["domain"]))
+            if key in used_hub_subjects:
                 continue
-            marginal = [item for item in cand["covered"] if (item["school"], item["domain"]) not in covered_pairs]
+            marginal = [item for item in cand["covered"] if (item["school"], item.get("subject", item["domain"])) not in covered_pairs]
             if not marginal:
                 continue
             gain = sum(item["weight"] for item in marginal) - cand["duplicate_ratio"] * 0.2
@@ -87,9 +118,9 @@ def greedy_select(candidates: list[dict], budget: int) -> list[dict]:
         if best is None:
             break
         selected.append(best)
-        used_hub_domains.add((best["hub"], best["domain"]))
+        used_hub_subjects.add((best["hub"], best.get("subject", best["domain"])))
         for item in best["marginal"]:
-            covered_pairs.add((item["school"], item["domain"]))
+            covered_pairs.add((item["school"], item.get("subject", item["domain"])))
     return selected
 
 
@@ -104,7 +135,7 @@ def simulate_assignments(
     before_scored = compute_sai(features, baseline_offerings)
     after_scored = compute_sai(features, combined, baseline_offerings=baseline_offerings)
     labels = (
-        joint.assign(label=lambda x: x["hub"] + ":" + x["domain"] + "(" + x["distance_km"].round(1).astype(str) + "km)")
+        joint.assign(label=lambda x: x["hub"] + ":" + x["subject"] + "/" + x["domain"] + "(" + x["distance_km"].round(1).astype(str) + "km)")
         .groupby("school")["label"].apply(lambda s: "; ".join(s.head(6))).to_dict()
         if not joint.empty else {}
     )

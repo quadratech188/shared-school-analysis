@@ -28,6 +28,7 @@ def assignment_rows(selected: list[dict]) -> pd.DataFrame:
         rows.append({
             "rank": rank,
             "hub": item["hub"],
+            "subject": item.get("subject", ""),
             "domain": item["domain"],
             "new_school_domain_pairs": len({(x["school"], x["domain"]) for x in item["marginal"]}),
             "new_schools": len(schools),

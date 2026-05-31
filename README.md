@@ -73,7 +73,7 @@ SAI files.
 
 `scripts/11_train_rl_assignments.py` trains a PyTorch reinforcement-learning
 policy for the main assignment problem. The agent observes candidate
-`(hub, domain)` actions, samples a budgeted sequence of joint-course openings,
+`(hub, subject, domain)` actions, samples a budgeted sequence of joint-course openings,
 and receives a tail-focused reward that prioritizes raising the minimum SAI of
 weak schools over improving the average. It is compared against the greedy
 baseline. Run it with:
