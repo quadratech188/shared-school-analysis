@@ -100,15 +100,15 @@ def build_candidates(
 def greedy_select(candidates: list[dict], budget: int) -> list[dict]:
     selected = []
     covered_pairs = set()
-    used_hub_subjects = set()
+    used_hub_domains = set()
     for _ in range(budget):
         best = None
         best_gain = 0
         for cand in candidates:
-            key = (cand["hub"], cand.get("subject", cand["domain"]))
-            if key in used_hub_subjects:
+            key = (cand["hub"], cand["domain"])
+            if key in used_hub_domains:
                 continue
-            marginal = [item for item in cand["covered"] if (item["school"], item.get("subject", item["domain"])) not in covered_pairs]
+            marginal = [item for item in cand["covered"] if (item["school"], item["domain"]) not in covered_pairs]
             if not marginal:
                 continue
             gain = sum(item["weight"] for item in marginal) - cand["duplicate_ratio"] * 0.2
@@ -118,9 +118,9 @@ def greedy_select(candidates: list[dict], budget: int) -> list[dict]:
         if best is None:
             break
         selected.append(best)
-        used_hub_subjects.add((best["hub"], best.get("subject", best["domain"])))
+        used_hub_domains.add((best["hub"], best["domain"]))
         for item in best["marginal"]:
-            covered_pairs.add((item["school"], item.get("subject", item["domain"])))
+            covered_pairs.add((item["school"], item["domain"]))
     return selected
 
 

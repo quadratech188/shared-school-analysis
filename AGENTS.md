@@ -47,6 +47,7 @@ Train the reinforcement-learning assignment policy and compare it with the
 greedy baseline:
 
 ```bash
+make recommend-greedy
 make recommend-rl
 ```
 

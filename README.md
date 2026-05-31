@@ -19,6 +19,7 @@ make check-inputs
 make collect-neis
 make geocode-facilities
 make facility-accessibility
+make recommend-greedy
 make recommend-rl
 make clean
 make rebuild
@@ -80,6 +81,13 @@ baseline. Run it with:
 
 ```bash
 make recommend-rl
+```
+
+The greedy baseline uses the same candidate space:
+
+```bash
+make recommend-greedy
+make recommend-greedy ASSIGNMENT_BUDGET=15 MAX_SUBJECTS_PER_DOMAIN=12
 ```
 
 Required feature joins must fail loudly. Schools with known missing required

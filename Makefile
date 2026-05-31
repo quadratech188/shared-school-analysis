@@ -1,6 +1,10 @@
 PYTHON ?= python3
 DATA_DIR ?= data/raw
 BUILD_DIR ?= build
+ASSIGNMENT_BUDGET ?= 10
+ASSIGNMENT_RADIUS_KM ?= 5
+WEAK_QUANTILE ?= 0.4
+MAX_SUBJECTS_PER_DOMAIN ?= 8
 PYTHONPATH := src
 export PYTHONPATH
 
@@ -11,7 +15,7 @@ REVIEW_DIR := $(BUILD_DIR)/review
 SUBJECT_OVERRIDES := config/subject_overrides.csv
 SUBJECT_IGNORES := config/subject_ignores.csv
 
-.PHONY: all check-inputs clean rebuild collect-neis geocode-facilities facility-accessibility recommend-rl
+.PHONY: all check-inputs clean rebuild collect-neis geocode-facilities facility-accessibility recommend-greedy recommend-rl
 
 all: \
 	$(INTERIM_DIR)/school_master.csv \
@@ -127,8 +131,19 @@ geocode-facilities: $(INTERIM_DIR)/facilities_geocoded.csv
 
 facility-accessibility: $(PROCESSED_DIR)/facility_accessibility.csv
 
+recommend-greedy: $(BUILD_DIR)/tables/school_sai_result.csv
+	MPLCONFIGDIR=/tmp/matplotlib $(PYTHON) scripts/10_recommend_joint_assignments.py \
+		--budget "$(ASSIGNMENT_BUDGET)" \
+		--radius-km "$(ASSIGNMENT_RADIUS_KM)" \
+		--weak-quantile "$(WEAK_QUANTILE)" \
+		--max-subjects-per-domain "$(MAX_SUBJECTS_PER_DOMAIN)"
+
 recommend-rl: $(BUILD_DIR)/tables/school_sai_result.csv
-	$(PYTHON) scripts/11_train_rl_assignments.py
+	MPLCONFIGDIR=/tmp/matplotlib $(PYTHON) scripts/11_train_rl_assignments.py \
+		--budget "$(ASSIGNMENT_BUDGET)" \
+		--radius-km "$(ASSIGNMENT_RADIUS_KM)" \
+		--weak-quantile "$(WEAK_QUANTILE)" \
+		--max-subjects-per-domain "$(MAX_SUBJECTS_PER_DOMAIN)"
 
 $(INTERIM_DIR)/joint_curriculum.csv: \
 	scripts/04_prepare_joint_curriculum.py \
