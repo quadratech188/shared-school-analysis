@@ -7,6 +7,7 @@ WEAK_QUANTILE ?= 0.4
 MAX_SUBJECTS_PER_DOMAIN ?= 8
 FACILITY_HUBS ?= $(INTERIM_DIR)/facilities_geocoded.csv
 FACILITY_HUBS_ARG = --facility-hubs "$(FACILITY_HUBS)"
+SAI_VORONOI_BASEMAP ?= --basemap
 PYTHONPATH := src
 export PYTHONPATH
 
@@ -18,7 +19,7 @@ SUBJECT_OVERRIDES := config/subject_overrides.csv
 SUBJECT_IGNORES := config/subject_ignores.csv
 FACILITY_GEOCODE_OVERRIDES := config/facility_geocode_overrides.csv
 
-.PHONY: all check-inputs clean rebuild collect-neis geocode-facilities facility-accessibility recommend-greedy recommend-rl recommend-actor-critic
+.PHONY: all check-inputs clean rebuild collect-neis geocode-facilities facility-accessibility plot-sai-voronoi plot-sai-voronoi-actor-critic recommend-greedy recommend-rl recommend-actor-critic
 
 all: \
 	$(INTERIM_DIR)/school_master.csv \
@@ -139,6 +140,39 @@ $(PROCESSED_DIR)/facility_accessibility.csv: \
 geocode-facilities: $(INTERIM_DIR)/facilities_geocoded.csv
 
 facility-accessibility: $(PROCESSED_DIR)/facility_accessibility.csv
+
+plot-sai-voronoi: $(BUILD_DIR)/figures/sai_voronoi_map.png
+
+plot-sai-voronoi-actor-critic: $(BUILD_DIR)/figures/sai_voronoi_actor_critic_comparison.png
+
+$(BUILD_DIR)/figures/sai_voronoi_map.png: \
+	scripts/13_plot_sai_voronoi.py \
+	src/coursemap/io.py \
+	src/coursemap/plots.py \
+	$(DATA_DIR)/high_school_zone_20260320_shp/고등학교학교군.shp \
+	$(BUILD_DIR)/tables/school_sai_result.csv
+	MPLCONFIGDIR=/tmp/matplotlib $(PYTHON) $< \
+		--sai "$(BUILD_DIR)/tables/school_sai_result.csv" \
+		--boundary "$(DATA_DIR)/high_school_zone_20260320_shp/고등학교학교군.shp" \
+		--boundary-filter "대전" \
+		$(SAI_VORONOI_BASEMAP) \
+		--out "$@"
+
+$(BUILD_DIR)/figures/sai_voronoi_actor_critic_comparison.png: \
+	scripts/13_plot_sai_voronoi.py \
+	src/coursemap/io.py \
+	src/coursemap/plots.py \
+	$(DATA_DIR)/high_school_zone_20260320_shp/고등학교학교군.shp \
+	$(BUILD_DIR)/tables/school_sai_result.csv \
+	$(BUILD_DIR)/tables/actor_critic_assignment_sai_simulation.csv
+	MPLCONFIGDIR=/tmp/matplotlib $(PYTHON) $< \
+		--sai "$(BUILD_DIR)/tables/school_sai_result.csv" \
+		--after-simulation "$(BUILD_DIR)/tables/actor_critic_assignment_sai_simulation.csv" \
+		--after-algorithm "actor_critic" \
+		--boundary "$(DATA_DIR)/high_school_zone_20260320_shp/고등학교학교군.shp" \
+		--boundary-filter "대전" \
+		$(SAI_VORONOI_BASEMAP) \
+		--out "$@"
 
 recommend-greedy: $(BUILD_DIR)/tables/school_sai_result.csv $(FACILITY_HUBS)
 	MPLCONFIGDIR=/tmp/matplotlib $(PYTHON) scripts/10_recommend_joint_assignments.py \
