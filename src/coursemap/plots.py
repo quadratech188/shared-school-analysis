@@ -3,6 +3,19 @@ from pathlib import Path
 import pandas as pd
 
 
+def _configure_korean_font() -> None:
+    import matplotlib.pyplot as plt
+    from matplotlib import font_manager
+
+    preferred = ["NanumGothic", "Noto Sans CJK KR", "Noto Sans"]
+    available = {font.name for font in font_manager.fontManager.ttflist}
+    for font in preferred:
+        if font in available:
+            plt.rcParams["font.family"] = font
+            plt.rcParams["axes.unicode_minus"] = False
+            return
+
+
 def save_before_after_dot_plot(
     df: pd.DataFrame,
     before_col: str,
@@ -12,27 +25,262 @@ def save_before_after_dot_plot(
     out_path: Path,
     title: str,
     horizontal_lines: list[tuple[float, str, str]] | None = None,
+    tier_labels: bool = False,
+    show_summary_lines: bool = False,
 ) -> None:
     import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
 
+    _configure_korean_font()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     plot = df.sort_values(before_col).reset_index(drop=True)
-    colors = ["#d97706" if label in highlight_labels else "#64748b" for label in plot[label_col]]
+    before = pd.to_numeric(plot[before_col], errors="coerce")
+    after = pd.to_numeric(plot[after_col], errors="coerce")
+
+    styles = []
+    legend_handles = []
+    if tier_labels:
+        bottom_one = set(plot.nsmallest(1, before_col)[label_col])
+        bottom_three = set(plot.nsmallest(min(3, len(plot)), before_col)[label_col]) - bottom_one
+        bottom_quarter = set(plot[before <= before.quantile(0.25)][label_col]) - bottom_one - bottom_three
+        for label in plot[label_col]:
+            if label in bottom_one:
+                styles.append(("#dc2626", 62, "최하"))
+            elif label in bottom_three:
+                styles.append(("#f97316", 52, "하 3"))
+            elif label in bottom_quarter:
+                styles.append(("#facc15", 46, "하 25%"))
+            elif label in highlight_labels:
+                styles.append(("#38bdf8", 38, "취약 학교"))
+            else:
+                styles.append(("#64748b", 30, "기타"))
+        legend_handles = [
+            Line2D([0], [0], marker="o", color="none", markerfacecolor="#dc2626", markeredgecolor="#7f1d1d", markersize=8, label="최하"),
+            Line2D([0], [0], marker="o", color="none", markerfacecolor="#f97316", markeredgecolor="#7c2d12", markersize=7, label="하 3"),
+            Line2D([0], [0], marker="o", color="none", markerfacecolor="#facc15", markeredgecolor="#854d0e", markersize=7, label="하 25%"),
+            Line2D([0], [0], marker="o", color="none", markerfacecolor="#64748b", markeredgecolor="#334155", markersize=6, label="기타"),
+        ]
+    else:
+        styles = [("#d97706", 38, "highlight") if label in highlight_labels else ("#64748b", 30, "other") for label in plot[label_col]]
+
     fig, ax = plt.subplots(figsize=(8, 5))
-    ax.scatter(plot[before_col], plot[after_col], c=colors, alpha=0.85)
+    for category in dict.fromkeys(item[2] for item in styles):
+        mask = [item[2] == category for item in styles]
+        color = next(item[0] for item in styles if item[2] == category)
+        size = next(item[1] for item in styles if item[2] == category)
+        ax.scatter(
+            before[mask],
+            after[mask],
+            c=color,
+            s=size,
+            edgecolors="#111827",
+            linewidths=0.35,
+            alpha=0.88,
+        )
     lo = min(plot[before_col].min(), plot[after_col].min()) - 2
     hi = max(plot[before_col].max(), plot[after_col].max()) + 2
     ax.plot([lo, hi], [lo, hi], color="#334155", linewidth=1, linestyle="--")
     for y, label, color in horizontal_lines or []:
         ax.axhline(y, color=color, linewidth=1.4, linestyle="-", alpha=0.9)
         ax.text(lo, y, f" {label}: {y:.1f}", color=color, va="bottom", fontsize=8)
+    if show_summary_lines:
+        before_mean = float(before.mean())
+        after_mean = float(after.mean())
+        before_min = float(before.min())
+        after_min = float(after.min())
+        ax.axhline(before_mean, color="#2563eb", linewidth=1.2, linestyle="--", alpha=0.75)
+        ax.axhline(after_mean, color="#2563eb", linewidth=1.2, linestyle="-", alpha=0.85)
+        ax.axhline(before_min, color="#dc2626", linewidth=1.2, linestyle="--", alpha=0.8)
+        ax.axhline(after_min, color="#dc2626", linewidth=1.2, linestyle=":", alpha=0.95)
+        legend_handles.extend([
+            Line2D([0], [0], color="#2563eb", linewidth=1.2, linestyle="--", label="전 평균"),
+            Line2D([0], [0], color="#2563eb", linewidth=1.2, linestyle="-", label="후 평균"),
+            Line2D([0], [0], color="#dc2626", linewidth=1.2, linestyle="--", label="전 최저"),
+            Line2D([0], [0], color="#dc2626", linewidth=1.2, linestyle=":", label="후 최저"),
+        ])
     ax.set_xlim(lo, hi)
     ax.set_ylim(lo, hi)
     ax.set_xlabel(before_col)
     ax.set_ylabel(after_col)
     ax.set_title(title)
     ax.grid(True, alpha=0.25)
+    if legend_handles:
+        ax.legend(handles=legend_handles, loc="lower right", frameon=True, fontsize=8)
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
+def save_algorithm_bar_comparison(
+    summary: pd.DataFrame,
+    out_path: Path,
+    points: pd.DataFrame | None = None,
+    baseline_mean: float | None = None,
+    algorithm_col: str = "algorithm",
+    mean_col: str = "mean_after",
+    std_col: str = "std_after",
+    min_col: str = "min_after",
+    point_value_col: str = "SAI_after_display",
+    title: str = "Algorithm SAI comparison",
+) -> None:
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    _configure_korean_font()
+    required = {algorithm_col, mean_col, std_col, min_col}
+    missing = required - set(summary.columns)
+    if missing:
+        raise ValueError(f"Algorithm comparison missing columns: {sorted(missing)}")
+
+    plot = summary.copy()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    colors = {
+        "Greedy": "#cbd5e1",
+        "RL": "#bae6fd",
+        "Actor-Critic": "#bfdbfe",
+    }
+    bar_colors = [colors.get(label, "#64748b") for label in plot[algorithm_col]]
+
+    fig, ax = plt.subplots(figsize=(7.5, 5))
+    x = np.arange(len(plot))
+    bars = ax.bar(
+        x,
+        plot[mean_col],
+        yerr=plot[std_col],
+        color=bar_colors,
+        edgecolor="#1f2937",
+        linewidth=0.7,
+        capsize=7,
+        error_kw={"elinewidth": 1.2, "ecolor": "#111827"},
+        zorder=2,
+    )
+    if points is not None and not points.empty:
+        point_required = {algorithm_col, point_value_col}
+        point_missing = point_required - set(points.columns)
+        if point_missing:
+            raise ValueError(f"Algorithm point data missing columns: {sorted(point_missing)}")
+        x_by_algorithm = {label: idx for idx, label in enumerate(plot[algorithm_col])}
+        for label, group in points.groupby(algorithm_col):
+            if label not in x_by_algorithm:
+                continue
+            idx = x_by_algorithm[label]
+            offsets = np.linspace(-0.19, 0.19, len(group)) if len(group) > 1 else np.array([0.0])
+            ax.scatter(
+                idx + offsets,
+                group[point_value_col],
+                s=18,
+                color="#334155",
+                alpha=0.62,
+                linewidth=0,
+                zorder=4,
+            )
+    for bar, mean_value, std_value, min_value in zip(bars, plot[mean_col], plot[std_col], plot[min_col]):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            mean_value + std_value + 0.55,
+            f"mean {mean_value:.1f}\nmin {min_value:.1f}",
+            ha="center",
+            va="bottom",
+            fontsize=8,
+            color="#111827",
+        )
+    if baseline_mean is not None:
+        ax.axhline(
+            baseline_mean,
+            color="#64748b",
+            linewidth=1.4,
+            linestyle="--",
+            alpha=0.9,
+            label=f"Before mean {baseline_mean:.1f}",
+            zorder=5,
+        )
+    ymin = max(0, float((plot[mean_col] - plot[std_col]).min()) - 3)
+    ymax = float((plot[mean_col] + plot[std_col]).max()) + 4.5
+    ax.set_ylim(ymin, ymax)
+    ax.set_xticks(x)
+    ax.set_xticklabels(plot[algorithm_col])
+    ax.set_ylabel("SAI_after")
+    ax.set_title(title)
+    ax.grid(axis="y", alpha=0.25)
+    ax.set_axisbelow(True)
+    if baseline_mean is not None:
+        ax.legend(loc="lower right", frameon=True, fontsize=8)
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
+def save_sai_stepped_domain_counts(
+    df: pd.DataFrame,
+    out_path: Path,
+    summary_out: Path | None = None,
+    sample_size: int = 10,
+    exclude_schools: set[str] | None = None,
+    sai_col: str = "SAI",
+    school_col: str = "학교명",
+) -> None:
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    _configure_korean_font()
+    domains = ["인문·사회", "자연·공학", "정보·AI", "예체능", "제2외국어·국제", "진로·융합"]
+    count_cols = [f"계열과목수_{domain}" for domain in domains]
+    required = {school_col, sai_col, *count_cols}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"SAI stepped domain plot missing columns: {sorted(missing)}")
+
+    exclude_schools = exclude_schools or set()
+    ranked = df[[school_col, sai_col, *count_cols]].dropna(subset=[school_col, sai_col]).copy()
+    ranked = ranked[~ranked[school_col].isin(exclude_schools)].sort_values(sai_col).reset_index(drop=True)
+    if ranked.empty:
+        raise ValueError("SAI stepped domain plot has no rows")
+    sample_count = min(sample_size, len(ranked))
+    indices = np.rint(np.linspace(0, len(ranked) - 1, sample_count)).astype(int)
+    selected = ranked.iloc[indices].drop_duplicates(school_col).reset_index(drop=True)
+    while len(selected) < sample_count and len(selected) < len(ranked):
+        remaining = ranked[~ranked[school_col].isin(set(selected[school_col]))]
+        selected = pd.concat([selected, remaining.head(sample_count - len(selected))], ignore_index=True)
+        selected = selected.sort_values(sai_col).reset_index(drop=True)
+    selected = selected.sort_values(sai_col, ascending=False).reset_index(drop=True)
+
+    if summary_out is not None:
+        summary_out.parent.mkdir(parents=True, exist_ok=True)
+        selected.to_csv(summary_out, index=False, encoding="utf-8-sig")
+
+    colors = {
+        "인문·사회": "#fecaca",
+        "자연·공학": "#bfdbfe",
+        "정보·AI": "#bbf7d0",
+        "예체능": "#fde68a",
+        "제2외국어·국제": "#ddd6fe",
+        "진로·융합": "#fed7aa",
+    }
+    y = np.arange(len(selected))
+    fig, ax = plt.subplots(figsize=(10, 6))
+    left = np.zeros(len(selected))
+    for domain, col in zip(domains, count_cols):
+        values = pd.to_numeric(selected[col], errors="coerce").fillna(0).to_numpy()
+        ax.barh(y, values, left=left, color=colors[domain], edgecolor="#334155", linewidth=0.45, label=domain)
+        for idx, value in enumerate(values):
+            if value >= 2:
+                ax.text(left[idx] + value / 2, idx, f"{int(value)}", ha="center", va="center", fontsize=8, color="#111827")
+        left += values
+
+    ax.set_yticks(y)
+    ax.set_yticklabels(selected[school_col])
+    ax.invert_yaxis()
+    ax.set_xlabel("계열별 과목 수")
+    ax.set_title("SAI 순 균등 표본 학교의 계열별 과목 수")
+    ax.grid(axis="x", alpha=0.25)
+    ax.set_axisbelow(True)
+
+    ax_sai = ax.twinx()
+    ax_sai.set_ylim(ax.get_ylim())
+    ax_sai.set_yticks(y)
+    ax_sai.set_yticklabels([f"{value:.1f}" for value in selected[sai_col]])
+    ax_sai.set_ylabel("SAI")
+    ax.legend(loc="lower right", frameon=True, fontsize=8, ncol=2)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=160, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -166,6 +414,7 @@ def save_sai_voronoi_comparison_map(
     before_df: pd.DataFrame,
     after_df: pd.DataFrame,
     out_path: Path,
+    assignment_hubs: pd.DataFrame | None = None,
     boundary_path: Path | None = None,
     boundary_filter: str | None = None,
     before_value_col: str = "SAI",
@@ -176,6 +425,7 @@ def save_sai_voronoi_comparison_map(
     before_title: str = "Before",
     after_title: str = "After Actor-Critic",
     basemap: bool = False,
+    assignment_radius_km: float = 5.0,
 ) -> None:
     import matplotlib.pyplot as plt
     import numpy as np
@@ -206,6 +456,18 @@ def save_sai_voronoi_comparison_map(
         geometry=[Point(xy) for xy in before[[lon_col, lat_col]].to_numpy(dtype=float)],
         crs="EPSG:4326",
     ).to_crs("EPSG:3857")
+    hub_gdf = None
+    if assignment_hubs is not None and not assignment_hubs.empty:
+        hub_required = {label_col, lon_col, lat_col}
+        hub_missing = hub_required - set(assignment_hubs.columns)
+        if hub_missing:
+            raise ValueError(f"Assignment hubs missing columns: {sorted(hub_missing)}")
+        hubs = assignment_hubs[[label_col, lon_col, lat_col]].dropna().drop_duplicates(label_col).copy()
+        hub_gdf = gpd.GeoDataFrame(
+            hubs,
+            geometry=[Point(xy) for xy in hubs[[lon_col, lat_col]].to_numpy(dtype=float)],
+            crs="EPSG:4326",
+        ).to_crs("EPSG:3857")
 
     boundary_gdf = None
     if boundary_path is not None:
@@ -268,6 +530,20 @@ def save_sai_voronoi_comparison_map(
         ax.scatter(points[:, 0], points[:, 1], s=11, c="#111827", linewidth=0, zorder=3)
         if boundary_gdf is not None:
             boundary_gdf.boundary.plot(ax=ax, color="#0f172a", linewidth=1.2, zorder=5)
+        if title == after_title and hub_gdf is not None and not hub_gdf.empty:
+            circles = hub_gdf.to_crs("EPSG:5179")
+            circles["geometry"] = circles.geometry.buffer(assignment_radius_km * 1000)
+            circles = circles.to_crs("EPSG:3857")
+            circles.boundary.plot(ax=ax, color="#facc15", linewidth=1.7, linestyle="--", zorder=6)
+            hub_gdf.plot(
+                ax=ax,
+                marker="*",
+                markersize=75,
+                color="#facc15",
+                edgecolor="#111827",
+                linewidth=0.7,
+                zorder=7,
+            )
         if basemap:
             try:
                 import contextily as cx

@@ -8,7 +8,6 @@ from coursemap.actor_critic_assignments import PolicyConfig, train_policy
 from coursemap.assignment_reporting import assignment_rows, existing_pairs, load_domain_matrix, summarize_sai
 from coursemap.assignments import IncrementalAssignmentSimulator, build_candidates, build_hub_table, domain_shortage_pairs, greedy_select, school_subject_sets, subject_catalog
 from coursemap.io import read_csv_smart, write_csv
-from coursemap.plots import save_before_after_dot_plot
 from coursemap.sai import regular_offerings
 
 
@@ -108,7 +107,6 @@ def main() -> None:
     parser.add_argument("--assignments-out", default="build/tables/actor_critic_assignment_recommendations.csv")
     parser.add_argument("--simulation-out", default="build/tables/actor_critic_assignment_sai_simulation.csv")
     parser.add_argument("--training-log-out", default="build/metadata/actor_critic_assignment_training_log.csv")
-    parser.add_argument("--plot-out", default="build/figures/actor_critic_assignment_sai_dot.png")
     args = parser.parse_args()
 
     features = read_csv_smart(Path(args.features))
@@ -163,24 +161,9 @@ def main() -> None:
     print("\n=== Actor-Critic Selected Assignments ===")
     print(selected_rows.drop(columns=["algorithm"]).to_string(index=False))
     print_comparison(greedy_sim, sim, weak)
-    weak_sim = sim[sim["학교명"].isin(set(weak["학교명"]))]
-    save_before_after_dot_plot(
-        sim,
-        before_col="SAI_before",
-        after_col="SAI_after",
-        label_col="학교명",
-        highlight_labels=set(weak["학교명"]),
-        out_path=Path(args.plot_out),
-        title="Actor-Critic assignment policy: SAI before vs after",
-        horizontal_lines=[
-            (weak_sim["SAI_after"].mean(), "weak after mean", "#0f766e"),
-            (weak_sim["SAI_after"].min(), "weak after min", "#dc2626"),
-        ],
-    )
     print(f"\nSaved assignments: {args.assignments_out}")
     print(f"Saved simulation: {args.simulation_out}")
     print(f"Saved training log: {args.training_log_out}")
-    print(f"Dot plot saved: {args.plot_out}")
 
 
 if __name__ == "__main__":

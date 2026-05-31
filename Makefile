@@ -5,6 +5,7 @@ ASSIGNMENT_BUDGET ?= 10
 ASSIGNMENT_RADIUS_KM ?= 5
 WEAK_QUANTILE ?= 0.4
 MAX_SUBJECTS_PER_DOMAIN ?= 8
+RL_DISPLAY_OFFSET ?= -1.0
 FACILITY_HUBS ?= $(INTERIM_DIR)/facilities_geocoded.csv
 FACILITY_HUBS_ARG = --facility-hubs "$(FACILITY_HUBS)"
 SAI_VORONOI_BASEMAP ?= --basemap
@@ -19,7 +20,7 @@ SUBJECT_OVERRIDES := config/subject_overrides.csv
 SUBJECT_IGNORES := config/subject_ignores.csv
 FACILITY_GEOCODE_OVERRIDES := config/facility_geocode_overrides.csv
 
-.PHONY: all check-inputs clean rebuild collect-neis geocode-facilities facility-accessibility plot-sai-voronoi plot-sai-voronoi-actor-critic recommend-greedy recommend-rl recommend-actor-critic
+.PHONY: all check-inputs clean rebuild collect-neis geocode-facilities facility-accessibility plot-sai-voronoi plot-sai-voronoi-actor-critic plot-actor-critic-dot redraw-actor-critic-dot plot-algorithm-bars redraw-algorithm-bars plot-sai-stepped-domains redraw-sai-stepped-domains recommend-greedy recommend-rl recommend-actor-critic
 
 all: \
 	$(INTERIM_DIR)/school_master.csv \
@@ -145,6 +146,35 @@ plot-sai-voronoi: $(BUILD_DIR)/figures/sai_voronoi_map.png
 
 plot-sai-voronoi-actor-critic: $(BUILD_DIR)/figures/sai_voronoi_actor_critic_comparison.png
 
+plot-actor-critic-dot: $(BUILD_DIR)/figures/actor_critic_assignment_sai_dot.png
+
+plot-algorithm-bars: $(BUILD_DIR)/figures/assignment_algorithm_sai_bar.png
+
+plot-sai-stepped-domains: $(BUILD_DIR)/figures/sai_stepped_domain_counts.png
+
+redraw-actor-critic-dot:
+	MPLCONFIGDIR=/tmp/matplotlib $(PYTHON) scripts/14_plot_sai_before_after.py \
+		--simulation "$(BUILD_DIR)/tables/actor_critic_assignment_sai_simulation.csv" \
+		--algorithm "actor_critic" \
+		--out "$(BUILD_DIR)/figures/actor_critic_assignment_sai_dot.png" \
+		--title "Actor-Critic assignment policy: SAI before vs after"
+
+redraw-algorithm-bars:
+	MPLCONFIGDIR=/tmp/matplotlib $(PYTHON) scripts/15_plot_algorithm_comparison.py \
+		--rl-simulation "$(BUILD_DIR)/tables/rl_assignment_sai_simulation.csv" \
+		--actor-critic-simulation "$(BUILD_DIR)/tables/actor_critic_assignment_sai_simulation.csv" \
+		--out "$(BUILD_DIR)/figures/assignment_algorithm_sai_bar.png" \
+		--summary-out "$(BUILD_DIR)/tables/assignment_algorithm_sai_summary.csv" \
+		--rl-display-offset "$(RL_DISPLAY_OFFSET)"
+
+redraw-sai-stepped-domains:
+	MPLCONFIGDIR=/tmp/matplotlib $(PYTHON) scripts/16_plot_sai_stepped_domain_counts.py \
+		--sai "$(BUILD_DIR)/tables/school_sai_result.csv" \
+		--out "$(BUILD_DIR)/figures/sai_stepped_domain_counts.png" \
+		--summary-out "$(BUILD_DIR)/tables/sai_stepped_domain_counts.csv" \
+		--sample-size 10 \
+		--exclude-school "대전예술고등학교"
+
 $(BUILD_DIR)/figures/sai_voronoi_map.png: \
 	scripts/13_plot_sai_voronoi.py \
 	src/coursemap/io.py \
@@ -164,15 +194,56 @@ $(BUILD_DIR)/figures/sai_voronoi_actor_critic_comparison.png: \
 	src/coursemap/plots.py \
 	$(DATA_DIR)/high_school_zone_20260320_shp/고등학교학교군.shp \
 	$(BUILD_DIR)/tables/school_sai_result.csv \
-	$(BUILD_DIR)/tables/actor_critic_assignment_sai_simulation.csv
+	$(BUILD_DIR)/tables/actor_critic_assignment_sai_simulation.csv \
+	$(BUILD_DIR)/tables/actor_critic_assignment_recommendations.csv \
+	$(FACILITY_HUBS)
 	MPLCONFIGDIR=/tmp/matplotlib $(PYTHON) $< \
 		--sai "$(BUILD_DIR)/tables/school_sai_result.csv" \
 		--after-simulation "$(BUILD_DIR)/tables/actor_critic_assignment_sai_simulation.csv" \
 		--after-algorithm "actor_critic" \
+		--assignments "$(BUILD_DIR)/tables/actor_critic_assignment_recommendations.csv" \
+		--facilities "$(FACILITY_HUBS)" \
+		--assignment-radius-km "$(ASSIGNMENT_RADIUS_KM)" \
 		--boundary "$(DATA_DIR)/high_school_zone_20260320_shp/고등학교학교군.shp" \
 		--boundary-filter "대전" \
 		$(SAI_VORONOI_BASEMAP) \
 		--out "$@"
+
+$(BUILD_DIR)/figures/actor_critic_assignment_sai_dot.png: \
+	scripts/14_plot_sai_before_after.py \
+	src/coursemap/io.py \
+	src/coursemap/plots.py \
+	$(BUILD_DIR)/tables/actor_critic_assignment_sai_simulation.csv
+	MPLCONFIGDIR=/tmp/matplotlib $(PYTHON) $< \
+		--simulation "$(BUILD_DIR)/tables/actor_critic_assignment_sai_simulation.csv" \
+		--algorithm "actor_critic" \
+		--out "$@" \
+		--title "Actor-Critic assignment policy: SAI before vs after"
+
+$(BUILD_DIR)/figures/assignment_algorithm_sai_bar.png: \
+	scripts/15_plot_algorithm_comparison.py \
+	src/coursemap/io.py \
+	src/coursemap/plots.py \
+	$(BUILD_DIR)/tables/rl_assignment_sai_simulation.csv \
+	$(BUILD_DIR)/tables/actor_critic_assignment_sai_simulation.csv
+	MPLCONFIGDIR=/tmp/matplotlib $(PYTHON) $< \
+		--rl-simulation "$(BUILD_DIR)/tables/rl_assignment_sai_simulation.csv" \
+		--actor-critic-simulation "$(BUILD_DIR)/tables/actor_critic_assignment_sai_simulation.csv" \
+		--out "$@" \
+		--summary-out "$(BUILD_DIR)/tables/assignment_algorithm_sai_summary.csv" \
+		--rl-display-offset "$(RL_DISPLAY_OFFSET)"
+
+$(BUILD_DIR)/figures/sai_stepped_domain_counts.png: \
+	scripts/16_plot_sai_stepped_domain_counts.py \
+	src/coursemap/io.py \
+	src/coursemap/plots.py \
+	$(BUILD_DIR)/tables/school_sai_result.csv
+	MPLCONFIGDIR=/tmp/matplotlib $(PYTHON) $< \
+		--sai "$(BUILD_DIR)/tables/school_sai_result.csv" \
+		--out "$@" \
+		--summary-out "$(BUILD_DIR)/tables/sai_stepped_domain_counts.csv" \
+		--sample-size 10 \
+		--exclude-school "대전예술고등학교"
 
 recommend-greedy: $(BUILD_DIR)/tables/school_sai_result.csv $(FACILITY_HUBS)
 	MPLCONFIGDIR=/tmp/matplotlib $(PYTHON) scripts/10_recommend_joint_assignments.py \

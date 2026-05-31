@@ -6,7 +6,6 @@ import pandas as pd
 from coursemap.assignment_reporting import assignment_rows, existing_pairs, load_domain_matrix, summarize_sai
 from coursemap.assignments import build_candidates, build_hub_table, domain_shortage_pairs, greedy_select, school_subject_sets, simulate_assignments, subject_catalog
 from coursemap.io import read_csv_smart
-from coursemap.plots import save_before_after_dot_plot
 from coursemap.sai import regular_offerings
 
 
@@ -55,7 +54,6 @@ def main() -> None:
     parser.add_argument("--neis-subjects", default="build/processed/neis_subjects_standardized.csv")
     parser.add_argument("--domain-supply", default="build/processed/school_domain_supply.csv")
     parser.add_argument("--joint-network", default="build/processed/joint_curriculum_existing_network.csv")
-    parser.add_argument("--plot-out", default="build/figures/joint_assignment_sai_dot.png")
     parser.add_argument("--budget", type=int, default=10)
     parser.add_argument("--radius-km", type=float, default=5.0)
     parser.add_argument("--weak-quantile", type=float, default=0.4)
@@ -88,16 +86,6 @@ def main() -> None:
     print_coverage_summary(selected, weak, shortage_pairs)
     sim = simulate_assignments(features, selected, args.radius_km, offerings, hubs=hubs)
     print_sai_stats(sim, weak)
-    save_before_after_dot_plot(
-        sim,
-        before_col="SAI_before",
-        after_col="SAI_after",
-        label_col="학교명",
-        highlight_labels=set(weak["학교명"]),
-        out_path=Path(args.plot_out),
-        title="Joint assignment simulation: SAI before vs after",
-    )
-    print(f"\nDot plot saved: {args.plot_out}")
 
 
 if __name__ == "__main__":
