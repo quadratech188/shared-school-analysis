@@ -15,7 +15,7 @@ REVIEW_DIR := $(BUILD_DIR)/review
 SUBJECT_OVERRIDES := config/subject_overrides.csv
 SUBJECT_IGNORES := config/subject_ignores.csv
 
-.PHONY: all check-inputs clean rebuild collect-neis geocode-facilities facility-accessibility recommend-greedy recommend-rl
+.PHONY: all check-inputs clean rebuild collect-neis geocode-facilities facility-accessibility recommend-greedy recommend-rl recommend-actor-critic
 
 all: \
 	$(INTERIM_DIR)/school_master.csv \
@@ -140,6 +140,13 @@ recommend-greedy: $(BUILD_DIR)/tables/school_sai_result.csv
 
 recommend-rl: $(BUILD_DIR)/tables/school_sai_result.csv
 	MPLCONFIGDIR=/tmp/matplotlib $(PYTHON) scripts/11_train_rl_assignments.py \
+		--budget "$(ASSIGNMENT_BUDGET)" \
+		--radius-km "$(ASSIGNMENT_RADIUS_KM)" \
+		--weak-quantile "$(WEAK_QUANTILE)" \
+		--max-subjects-per-domain "$(MAX_SUBJECTS_PER_DOMAIN)"
+
+recommend-actor-critic: $(BUILD_DIR)/tables/school_sai_result.csv
+	MPLCONFIGDIR=/tmp/matplotlib $(PYTHON) scripts/12_train_actor_critic_assignments.py \
 		--budget "$(ASSIGNMENT_BUDGET)" \
 		--radius-km "$(ASSIGNMENT_RADIUS_KM)" \
 		--weak-quantile "$(WEAK_QUANTILE)" \

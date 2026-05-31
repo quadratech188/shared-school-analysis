@@ -54,7 +54,8 @@ The pipeline currently builds:
 ## SAI Algorithm
 
 SAI is intentionally computed from combined course offerings, not from a set of
-pre-baked database counters.
+pre-baked database counters. The score uses a fixed subject-count target so a
+single school can be updated without recomputing the full distribution.
 
 `src/coursemap/sai.py` owns the algorithm:
 
@@ -65,22 +66,30 @@ pre-baked database counters.
 - `compute_sai()` recomputes subject diversity, domain breadth, domain balance,
   and final SAI from the combined offering set. Joint classes affect SAI only
   by changing that offering set; they are not a separate score bucket.
+- `IncrementalSaiState` is the optimization-facing API. It clones the baseline
+  school state, applies proposed offerings, and rescoring only needs simple
+  school-level sets and six domain counts.
 
 This means optimization code can propose assignments in memory, combine them
 with regular offerings, and call `compute_sai()` without writing intermediate
 SAI files.
 
-## RL Assignment Policy
+## RL Assignment Policies
 
-`scripts/11_train_rl_assignments.py` trains a PyTorch reinforcement-learning
-policy for the main assignment problem. The agent observes candidate
-`(hub, subject, domain)` actions, samples a budgeted sequence of joint-course openings,
-and receives a tail-focused reward that prioritizes raising the minimum SAI of
-weak schools over improving the average. It is compared against the greedy
-baseline. Run it with:
+`scripts/11_train_rl_assignments.py` keeps the simpler PyTorch policy-gradient
+assignment policy. It samples budgeted `(hub, subject, domain)` openings and is
+kept as the first RL baseline:
 
 ```bash
 make recommend-rl
+```
+
+`scripts/12_train_actor_critic_assignments.py` is the larger Actor-Critic
+experiment. It adds current assignment state features, step rewards, and a value
+head. By default, training uses the incremental SAI simulator:
+
+```bash
+make recommend-actor-critic
 ```
 
 The greedy baseline uses the same candidate space:

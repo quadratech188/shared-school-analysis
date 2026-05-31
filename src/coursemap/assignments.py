@@ -1,7 +1,7 @@
 import pandas as pd
 
 from coursemap.geo import haversine_km
-from coursemap.sai import assignment_offerings, combine_offerings, compute_sai
+from coursemap.sai import IncrementalSaiState, assignment_offerings, combine_offerings, compute_sai
 
 
 DEFAULT_DOMAINS = ["정보·AI", "자연·공학", "진로·융합", "제2외국어·국제", "인문·사회", "예체능"]
@@ -124,23 +124,86 @@ def greedy_select(candidates: list[dict], budget: int) -> list[dict]:
     return selected
 
 
+class IncrementalAssignmentSimulator:
+    def __init__(self, features: pd.DataFrame, baseline_offerings: pd.DataFrame, radius_km: float) -> None:
+        self.features = features
+        self.baseline_offerings = baseline_offerings
+        self.radius_km = radius_km
+        self.baseline_state = IncrementalSaiState.from_offerings(features, baseline_offerings)
+        baseline_scores = self.baseline_state.score_frame()[["학교명", "SAI"]]
+        self.before_sai = baseline_scores.set_index("학교명")["SAI"].to_dict()
+        self.before_scored = baseline_scores.rename(columns={"SAI": "SAI_before"})
+        self.schools = features[["학교명", "위도", "경도"]].copy()
+        self.hubs = self.schools.set_index("학교명")
+        self.recipient_cache: dict[tuple[str, str, str], list[tuple[str, float]]] = {}
+
+    def recipients(self, assignment: dict) -> list[tuple[str, float]]:
+        hub_name = assignment["hub"]
+        domain = assignment["domain"]
+        subject = assignment.get("subject") or f"공동수업:{domain}:{hub_name}"
+        key = (hub_name, subject, domain)
+        if key in self.recipient_cache:
+            return self.recipient_cache[key]
+        if hub_name not in self.hubs.index:
+            self.recipient_cache[key] = []
+            return []
+        hub = self.hubs.loc[hub_name]
+        out = []
+        for school in self.schools.itertuples(index=False):
+            if pd.isna(hub["위도"]) or pd.isna(hub["경도"]) or pd.isna(school.위도) or pd.isna(school.경도):
+                continue
+            distance = haversine_km(hub["위도"], hub["경도"], school.위도, school.경도)
+            if distance <= self.radius_km:
+                out.append((school.학교명, distance))
+        self.recipient_cache[key] = out
+        return out
+
+    def state_after(self, selected: list[dict]) -> tuple[IncrementalSaiState, dict[str, list[str]]]:
+        state = self.baseline_state.clone()
+        labels: dict[str, list[str]] = {}
+        for assignment in selected:
+            hub_name = assignment["hub"]
+            domain = assignment["domain"]
+            subject = assignment.get("subject") or f"공동수업:{domain}:{hub_name}"
+            for school_name, distance in self.recipients(assignment):
+                state.apply_offering(school_name, subject, domain)
+                labels.setdefault(school_name, []).append(f"{hub_name}:{subject}/{domain}({distance:.1f}km)")
+        return state, labels
+
+    def score_selected(self, selected: list[dict]) -> dict[str, float]:
+        state = self.baseline_state.clone()
+        touched: set[str] = set()
+        distances = []
+        for assignment in selected:
+            hub_name = assignment["hub"]
+            domain = assignment["domain"]
+            subject = assignment.get("subject") or f"공동수업:{domain}:{hub_name}"
+            for school_name, distance in self.recipients(assignment):
+                if state.apply_offering(school_name, subject, domain):
+                    touched.add(school_name)
+                distances.append(distance)
+        after = dict(self.before_sai)
+        for school_name in touched:
+            after[school_name] = state.score_school(school_name)
+        return {
+            "after": after,
+            "delta": {school: after[school] - before for school, before in self.before_sai.items()},
+            "avg_distance": sum(distances) / len(distances) if distances else self.radius_km,
+        }
+
+    def simulate(self, selected: list[dict]) -> pd.DataFrame:
+        state, labels = self.state_after(selected)
+        after_scored = state.score_frame()[["학교명", "SAI", "공동수업과목수"]].rename(columns={"SAI": "SAI_after"})
+        out = self.before_scored.merge(after_scored, on="학교명", how="left")
+        out["공동수업참여가능"] = out["학교명"].map(lambda name: "; ".join(labels.get(name, [])[:6])).fillna("")
+        out["SAI_delta"] = out["SAI_after"] - out["SAI_before"]
+        return out.sort_values("SAI_delta", ascending=False)
+
+
 def simulate_assignments(
     features: pd.DataFrame,
     selected: list[dict],
     radius_km: float,
     baseline_offerings: pd.DataFrame,
 ) -> pd.DataFrame:
-    joint = assignment_offerings(features, selected, radius_km)
-    combined = combine_offerings(baseline_offerings, joint)
-    before_scored = compute_sai(features, baseline_offerings)
-    after_scored = compute_sai(features, combined, baseline_offerings=baseline_offerings)
-    labels = (
-        joint.assign(label=lambda x: x["hub"] + ":" + x["subject"] + "/" + x["domain"] + "(" + x["distance_km"].round(1).astype(str) + "km)")
-        .groupby("school")["label"].apply(lambda s: "; ".join(s.head(6))).to_dict()
-        if not joint.empty else {}
-    )
-    out = after_scored[["학교명", "SAI", "공동수업과목수"]].rename(columns={"SAI": "SAI_after"})
-    out = before_scored[["학교명", "SAI"]].rename(columns={"SAI": "SAI_before"}).merge(out, on="학교명", how="left")
-    out["공동수업참여가능"] = out["학교명"].map(labels).fillna("")
-    out["SAI_delta"] = out["SAI_after"] - out["SAI_before"]
-    return out.sort_values("SAI_delta", ascending=False)
+    return IncrementalAssignmentSimulator(features, baseline_offerings, radius_km).simulate(selected)

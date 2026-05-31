@@ -14,11 +14,15 @@ average SAI while leaving the lowest-SAI schools unchanged.
 
 SAI was redesigned around combined course offerings. Regular school courses and
 new joint-course assignments are converted into the same internal offering
-schema, then merged before scoring.
+schema, then scored as school-level subject sets and six domain counts.
 
 Joint courses are therefore not a separate bonus bucket. They affect SAI only
 by changing the actual combined subject supply used to compute subject
 diversity, domain breadth, and domain balance.
+
+The current SAI uses a fixed target subject count for subject diversity. This
+removes the old full-distribution min/max scaling, so optimization can update
+one school at a time without changing every other school's scale.
 
 ## 3. Fairness-Oriented Objective
 
@@ -47,8 +51,23 @@ The assignment problem is modeled as sequential decision-making.
 - Episode: select up to the assignment budget.
 - Reward: compute post-assignment SAI and score the result.
 
-The current implementation uses a PyTorch policy network and compares its
+Step 11 keeps the simpler PyTorch policy-gradient network and compares its
 result against the greedy baseline.
+
+Step 12 is the larger Actor-Critic experiment. Its policy input combines
+candidate features with the current assignment state,
+including budget progress, covered shortage ratio, current reward score, average
+selected distance, hub diversity, and domain usage. This lets the same candidate
+be evaluated differently early and late in an episode.
+
+Rewards are assigned at each step from the incremental improvement in the
+current assignment score. The critic learns the expected return for the current
+state, reducing the variance of policy-gradient updates.
+
+For runtime, Step 11 and Step 12 use the incremental SAI simulator. It clones a
+baseline `IncrementalSaiState`, applies proposed joint offerings, and computes
+SAI from in-memory subject sets and domain counts. The reward is the real
+incremental SAI objective, not a separate proxy.
 
 ## 5. Current Reward Design
 

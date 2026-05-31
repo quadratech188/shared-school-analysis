@@ -1,4 +1,5 @@
 import math
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -6,8 +7,9 @@ import pandas as pd
 from coursemap.geo import haversine_km
 
 
-SAI_VERSION = "sai_v3_combined_offerings"
+SAI_VERSION = "sai_v4_incremental_offerings"
 DOMAINS = ["인문·사회", "자연·공학", "정보·AI", "예체능", "제2외국어·국제", "진로·융합"]
+DEFAULT_TARGET_SUBJECT_COUNT = 35
 
 
 def regular_offerings(neis_subjects: pd.DataFrame) -> pd.DataFrame:
@@ -73,6 +75,117 @@ def shannon_balance(counts: list[float]) -> float:
     return float((-(p * np.log(p)).sum()) / math.log(len(values)))
 
 
+def subject_diversity_score(subject_count: int, target_subject_count: int) -> float:
+    return float(min(subject_count / max(target_subject_count, 1), 1.0) * 100.0)
+
+
+def domain_width_score(domain_counts: dict[str, int] | pd.Series) -> float:
+    return float(sum(int(domain_counts.get(domain, 0)) > 0 for domain in DOMAINS) / len(DOMAINS) * 100.0)
+
+
+def sai_from_counts(domain_counts: dict[str, int] | pd.Series, subject_count: int, target_subject_count: int) -> float:
+    width = domain_width_score(domain_counts)
+    balance = shannon_balance([int(domain_counts.get(domain, 0)) for domain in DOMAINS]) * 100.0
+    diversity = subject_diversity_score(subject_count, target_subject_count)
+    return float(0.55 * width + 0.35 * balance + 0.10 * diversity)
+
+
+def target_subject_count_from_offerings(offerings: pd.DataFrame, default: int = DEFAULT_TARGET_SUBJECT_COUNT) -> int:
+    if offerings is None or offerings.empty:
+        return default
+    counts = offerings.groupby("school")["subject"].nunique()
+    if counts.empty:
+        return default
+    return max(int(counts.max()), default)
+
+
+@dataclass
+class IncrementalSaiState:
+    school_names: list[str]
+    subject_sets: dict[str, set[str]]
+    domain_counts: dict[str, dict[str, int]]
+    joint_subject_sets: dict[str, set[str]]
+    target_subject_count: int
+
+    @classmethod
+    def from_offerings(
+        cls,
+        schools: pd.DataFrame,
+        offerings: pd.DataFrame,
+        target_subject_count: int | None = None,
+    ) -> "IncrementalSaiState":
+        school_names = schools["학교명"].astype(str).tolist()
+        subject_sets = {name: set() for name in school_names}
+        joint_subject_sets = {name: set() for name in school_names}
+        domain_counts = {name: {domain: 0 for domain in DOMAINS} for name in school_names}
+        if target_subject_count is None:
+            target_subject_count = target_subject_count_from_offerings(offerings)
+        if offerings is not None and not offerings.empty:
+            for row in offerings.itertuples(index=False):
+                school = str(getattr(row, "school"))
+                subject = str(getattr(row, "subject"))
+                domain = str(getattr(row, "domain"))
+                source = str(getattr(row, "source", "regular"))
+                if school in subject_sets and domain in DOMAINS and subject not in subject_sets[school]:
+                    subject_sets[school].add(subject)
+                    domain_counts[school][domain] += 1
+                if school in joint_subject_sets and source == "joint_assignment":
+                    joint_subject_sets[school].add(subject)
+        return cls(school_names, subject_sets, domain_counts, joint_subject_sets, int(target_subject_count))
+
+    def clone(self) -> "IncrementalSaiState":
+        return IncrementalSaiState(
+            school_names=list(self.school_names),
+            subject_sets={school: set(subjects) for school, subjects in self.subject_sets.items()},
+            domain_counts={school: dict(counts) for school, counts in self.domain_counts.items()},
+            joint_subject_sets={school: set(subjects) for school, subjects in self.joint_subject_sets.items()},
+            target_subject_count=self.target_subject_count,
+        )
+
+    def apply_offering(self, school: str, subject: str, domain: str, source: str = "joint_assignment") -> bool:
+        school = str(school)
+        subject = str(subject)
+        domain = str(domain)
+        if school not in self.subject_sets or domain not in DOMAINS:
+            return False
+        changed = False
+        if subject not in self.subject_sets[school]:
+            self.subject_sets[school].add(subject)
+            self.domain_counts[school][domain] += 1
+            changed = True
+        if source == "joint_assignment":
+            self.joint_subject_sets[school].add(subject)
+        return changed
+
+    def score_school(self, school: str) -> float:
+        return sai_from_counts(
+            self.domain_counts[school],
+            len(self.subject_sets[school]),
+            self.target_subject_count,
+        )
+
+    def score_frame(self) -> pd.DataFrame:
+        rows = []
+        for school in self.school_names:
+            counts = self.domain_counts[school]
+            subject_count = len(self.subject_sets[school])
+            rows.append({
+                "학교명": school,
+                "과목수": subject_count,
+                "계열폭": int(sum(counts[domain] > 0 for domain in DOMAINS)),
+                "계열균형": shannon_balance([counts[domain] for domain in DOMAINS]),
+                "공동수업과목수": len(self.joint_subject_sets[school]),
+                "과목다양성": subject_diversity_score(subject_count, self.target_subject_count),
+                "계열폭점수": domain_width_score(counts),
+                "계열균형성": shannon_balance([counts[domain] for domain in DOMAINS]) * 100.0,
+                "SAI": sai_from_counts(counts, subject_count, self.target_subject_count),
+                **{f"계열과목수_{domain}": int(counts[domain]) for domain in DOMAINS},
+            })
+        out = pd.DataFrame(rows)
+        out["SAI_algorithm"] = SAI_VERSION
+        return out
+
+
 def offering_metrics(schools: pd.DataFrame, offerings: pd.DataFrame) -> pd.DataFrame:
     rows = []
     grouped = offerings.groupby("school") if not offerings.empty else {}
@@ -112,18 +225,7 @@ def compute_sai(
     offerings: pd.DataFrame,
     baseline_offerings: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
-    metrics = offering_metrics(schools, offerings)
-    baseline = offering_metrics(schools, baseline_offerings if baseline_offerings is not None else offerings)
+    target = target_subject_count_from_offerings(baseline_offerings if baseline_offerings is not None else offerings)
+    metrics = IncrementalSaiState.from_offerings(schools, offerings, target).score_frame()
     result = schools.merge(metrics, on="학교명", how="left")
-
-    result["과목다양성"] = scale_0_100(metrics["과목수"], baseline["과목수"].min(), baseline["과목수"].max())
-    result["계열폭점수"] = (metrics["계열폭"] / len(DOMAINS) * 100).clip(0, 100)
-    result["계열균형성"] = (metrics["계열균형"] * 100).clip(0, 100)
-
-    result["SAI"] = (
-        0.55 * result["계열폭점수"]
-        + 0.35 * result["계열균형성"]
-        + 0.10 * result["과목다양성"]
-    )
-    result["SAI_algorithm"] = SAI_VERSION
     return result

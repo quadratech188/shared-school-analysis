@@ -49,6 +49,7 @@ greedy baseline:
 ```bash
 make recommend-greedy
 make recommend-rl
+make recommend-actor-critic
 ```
 
 Clean and rebuild generated artifacts:

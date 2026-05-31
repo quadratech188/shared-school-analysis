@@ -4,49 +4,38 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from coursemap.actor_critic_assignments import PolicyConfig, train_policy
 from coursemap.assignment_reporting import assignment_rows, existing_pairs, load_domain_matrix, summarize_sai
 from coursemap.assignments import IncrementalAssignmentSimulator, build_candidates, domain_shortage_pairs, greedy_select, school_subject_sets, subject_catalog
 from coursemap.io import read_csv_smart, write_csv
 from coursemap.plots import save_before_after_dot_plot
-from coursemap.rl_assignments import PolicyConfig, train_policy
 from coursemap.sai import regular_offerings
 
 
-def selection_key(selected: list[dict]) -> tuple[tuple[str, str], ...]:
-    return tuple(sorted((x["hub"], x.get("subject", x["domain"])) for x in selected))
+def selection_key(selected: list[dict]) -> tuple[tuple[str, str, str], ...]:
+    return tuple(sorted((x["hub"], x.get("subject", x["domain"]), x["domain"]) for x in selected))
 
 
-def make_reward_fn(
-    simulator: IncrementalAssignmentSimulator,
-    weak: pd.DataFrame,
-):
+def make_incremental_reward_fn(simulator: IncrementalAssignmentSimulator, weak: pd.DataFrame):
     weak_names = set(weak["학교명"])
     weak_before = weak["SAI"]
-    weak_before_min = float(weak["SAI"].min())
-    weak_before_mean = float(weak["SAI"].mean())
-    cache = {}
+    weak_before_min = float(weak_before.min())
+    weak_before_mean = float(weak_before.mean())
     weak_q25_before = float(weak_before.quantile(0.25))
     weak_bottom3_before = float(weak_before.nsmallest(min(3, len(weak_before))).mean())
+    cache = {}
 
     def reward(selected: list[dict]) -> float:
         key = selection_key(selected)
         if key in cache:
             return cache[key]
         if not selected:
-            cache[key] = -100.0
+            cache[key] = 0.0
             return cache[key]
         scores = simulator.score_selected(selected)
         weak_after = np.array([scores["after"][name] for name in weak_names], dtype=float)
         weak_delta = np.array([scores["delta"][name] for name in weak_names], dtype=float)
         all_delta = np.array(list(scores["delta"].values()), dtype=float)
-        weak_mean_after = float(weak_after.mean())
-        weak_mean_delta = float(weak_delta.mean())
-        all_mean_delta = float(all_delta.mean())
-        weak_min_delta = float(weak_delta.min())
-        weak_min_after = float(weak_after.min())
-        weak_q25_after = float(np.quantile(weak_after, 0.25))
-        weak_bottom3_after = float(np.sort(weak_after)[: min(3, len(weak_after))].mean())
-        weak_improved_ratio = float((weak_delta > 0).mean())
         distances = [
             x["distance_km"]
             for item in selected
@@ -54,14 +43,14 @@ def make_reward_fn(
         ]
         avg_distance = sum(distances) / len(distances) if distances else scores["avg_distance"]
         value = (
-            3.00 * (weak_min_after - weak_before_min)
-            + 2.00 * (weak_mean_after - weak_before_mean)
-            + 1.50 * (weak_q25_after - weak_q25_before)
-            + 1.20 * (weak_bottom3_after - weak_bottom3_before)
-            + 0.60 * weak_min_delta
-            + 0.50 * weak_mean_delta
-            + 0.25 * all_mean_delta
-            + 2.00 * weak_improved_ratio
+            3.00 * (weak_after.min() - weak_before_min)
+            + 2.00 * (weak_after.mean() - weak_before_mean)
+            + 1.50 * (np.quantile(weak_after, 0.25) - weak_q25_before)
+            + 1.20 * (np.sort(weak_after)[: min(3, len(weak_after))].mean() - weak_bottom3_before)
+            + 0.60 * weak_delta.min()
+            + 0.50 * weak_delta.mean()
+            + 0.25 * all_delta.mean()
+            + 2.00 * (weak_delta > 0).mean()
             - 0.05 * avg_distance
         )
         cache[key] = float(value)
@@ -72,16 +61,15 @@ def make_reward_fn(
 
 def print_comparison(greedy_sim: pd.DataFrame, rl_sim: pd.DataFrame, weak: pd.DataFrame) -> None:
     rows = []
-    for label, sim in [("greedy", greedy_sim), ("rl_policy", rl_sim)]:
+    for label, sim in [("greedy", greedy_sim), ("actor_critic", rl_sim)]:
         rows.append(summarize_sai(f"{label}_all", sim))
         rows.append(summarize_sai(f"{label}_weak", sim[sim["학교명"].isin(set(weak["학교명"]))]))
-    stats = pd.DataFrame(rows)
-    print("\n=== Greedy vs RL SAI Stats ===")
-    print(stats.round(3).to_string(index=False))
+    print("\n=== Greedy vs Actor-Critic SAI Stats ===")
+    print(pd.DataFrame(rows).round(3).to_string(index=False))
 
     weak_names = set(weak["학교명"])
     tail_rows = []
-    for label, sim in [("greedy", greedy_sim), ("rl_policy", rl_sim)]:
+    for label, sim in [("greedy", greedy_sim), ("actor_critic", rl_sim)]:
         w = sim[sim["학교명"].isin(weak_names)]
         tail_rows.append({
             "algorithm": label,
@@ -95,18 +83,6 @@ def print_comparison(greedy_sim: pd.DataFrame, rl_sim: pd.DataFrame, weak: pd.Da
         })
     print("\n=== Weak-School Tail Focus ===")
     print(pd.DataFrame(tail_rows).round(3).to_string(index=False))
-
-    compare = rl_sim[["학교명", "SAI_before", "SAI_after", "SAI_delta"]].merge(
-        greedy_sim[["학교명", "SAI_after", "SAI_delta"]].rename(
-            columns={"SAI_after": "greedy_SAI_after", "SAI_delta": "greedy_SAI_delta"}
-        ),
-        on="학교명",
-        how="left",
-    )
-    compare["rl_minus_greedy_delta"] = compare["SAI_delta"] - compare["greedy_SAI_delta"]
-    print("\n=== RL Advantage by School ===")
-    cols = ["학교명", "SAI_before", "greedy_SAI_delta", "SAI_delta", "rl_minus_greedy_delta"]
-    print(compare.sort_values("rl_minus_greedy_delta", ascending=False)[cols].round(3).head(15).to_string(index=False))
 
 
 def main() -> None:
@@ -123,12 +99,14 @@ def main() -> None:
     parser.add_argument("--episodes", type=int, default=300)
     parser.add_argument("--learning-rate", type=float, default=0.003)
     parser.add_argument("--entropy-weight", type=float, default=0.03)
+    parser.add_argument("--value-weight", type=float, default=0.5)
+    parser.add_argument("--gamma", type=float, default=0.95)
     parser.add_argument("--hidden-dim", type=int, default=64)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--assignments-out", default="build/tables/rl_assignment_recommendations.csv")
-    parser.add_argument("--simulation-out", default="build/tables/rl_assignment_sai_simulation.csv")
-    parser.add_argument("--training-log-out", default="build/metadata/rl_assignment_training_log.csv")
-    parser.add_argument("--plot-out", default="build/figures/rl_assignment_sai_dot.png")
+    parser.add_argument("--assignments-out", default="build/tables/actor_critic_assignment_recommendations.csv")
+    parser.add_argument("--simulation-out", default="build/tables/actor_critic_assignment_sai_simulation.csv")
+    parser.add_argument("--training-log-out", default="build/metadata/actor_critic_assignment_training_log.csv")
+    parser.add_argument("--plot-out", default="build/figures/actor_critic_assignment_sai_dot.png")
     args = parser.parse_args()
 
     features = read_csv_smart(Path(args.features))
@@ -148,54 +126,48 @@ def main() -> None:
     if not candidates:
         raise SystemExit("no assignment candidates")
 
-    simulator = IncrementalAssignmentSimulator(features, offerings, args.radius_km)
-    reward_fn = make_reward_fn(simulator, weak)
     config = PolicyConfig(
         episodes=args.episodes,
         learning_rate=args.learning_rate,
         entropy_weight=args.entropy_weight,
+        value_weight=args.value_weight,
+        gamma=args.gamma,
         hidden_dim=args.hidden_dim,
         seed=args.seed,
     )
-    rl_selected, train_log, _theta = train_policy(
-        candidates,
-        reward_fn,
-        args.budget,
-        weak_count=len(weak),
-        shortage_count=len(shortage_pairs),
-        radius_km=args.radius_km,
-        config=config,
-    )
+    simulator = IncrementalAssignmentSimulator(features, offerings, args.radius_km)
+    reward_fn = make_incremental_reward_fn(simulator, weak)
+    selected, train_log, _model = train_policy(candidates, reward_fn, args.budget, len(weak), len(shortage_pairs), args.radius_km, config)
     greedy_selected = greedy_select(candidates, args.budget)
 
-    rl_rows = assignment_rows(rl_selected)
+    selected_rows = assignment_rows(selected)
     greedy_rows = assignment_rows(greedy_selected)
-    rl_rows["algorithm"] = "rl_policy"
+    selected_rows["algorithm"] = "actor_critic"
     greedy_rows["algorithm"] = "greedy_baseline"
-    write_csv(pd.concat([rl_rows, greedy_rows], ignore_index=True), Path(args.assignments_out))
+    write_csv(pd.concat([selected_rows, greedy_rows], ignore_index=True), Path(args.assignments_out))
     write_csv(train_log, Path(args.training_log_out))
 
-    rl_sim = simulator.simulate(rl_selected)
+    sim = simulator.simulate(selected)
     greedy_sim = simulator.simulate(greedy_selected)
-    rl_sim["algorithm"] = "rl_policy"
+    sim["algorithm"] = "actor_critic"
     greedy_sim["algorithm"] = "greedy_baseline"
-    write_csv(pd.concat([rl_sim, greedy_sim], ignore_index=True), Path(args.simulation_out))
+    write_csv(pd.concat([sim, greedy_sim], ignore_index=True), Path(args.simulation_out))
 
-    print("\n=== RL Selected Assignments ===")
-    print(rl_rows.drop(columns=["algorithm"]).to_string(index=False))
-    print_comparison(greedy_sim, rl_sim, weak)
-    weak_rl = rl_sim[rl_sim["학교명"].isin(set(weak["학교명"]))]
+    print("\n=== Actor-Critic Selected Assignments ===")
+    print(selected_rows.drop(columns=["algorithm"]).to_string(index=False))
+    print_comparison(greedy_sim, sim, weak)
+    weak_sim = sim[sim["학교명"].isin(set(weak["학교명"]))]
     save_before_after_dot_plot(
-        rl_sim,
+        sim,
         before_col="SAI_before",
         after_col="SAI_after",
         label_col="학교명",
         highlight_labels=set(weak["학교명"]),
         out_path=Path(args.plot_out),
-        title="RL assignment policy: SAI before vs after",
+        title="Actor-Critic assignment policy: SAI before vs after",
         horizontal_lines=[
-            (weak_rl["SAI_after"].mean(), "weak after mean", "#0f766e"),
-            (weak_rl["SAI_after"].min(), "weak after min", "#dc2626"),
+            (weak_sim["SAI_after"].mean(), "weak after mean", "#0f766e"),
+            (weak_sim["SAI_after"].min(), "weak after min", "#dc2626"),
         ],
     )
     print(f"\nSaved assignments: {args.assignments_out}")
