@@ -5,6 +5,8 @@ ASSIGNMENT_BUDGET ?= 10
 ASSIGNMENT_RADIUS_KM ?= 5
 WEAK_QUANTILE ?= 0.4
 MAX_SUBJECTS_PER_DOMAIN ?= 8
+FACILITY_HUBS ?= $(INTERIM_DIR)/facilities_geocoded.csv
+FACILITY_HUBS_ARG = --facility-hubs "$(FACILITY_HUBS)"
 PYTHONPATH := src
 export PYTHONPATH
 
@@ -14,6 +16,7 @@ PROCESSED_DIR := $(BUILD_DIR)/processed
 REVIEW_DIR := $(BUILD_DIR)/review
 SUBJECT_OVERRIDES := config/subject_overrides.csv
 SUBJECT_IGNORES := config/subject_ignores.csv
+FACILITY_GEOCODE_OVERRIDES := config/facility_geocode_overrides.csv
 
 .PHONY: all check-inputs clean rebuild collect-neis geocode-facilities facility-accessibility recommend-greedy recommend-rl recommend-actor-critic
 
@@ -111,11 +114,17 @@ $(INTERIM_DIR)/facilities_geocoded.csv: \
 	scripts/04_geocode_facilities.py \
 	src/coursemap/geocode.py \
 	src/coursemap/io.py \
-	$(INTERIM_DIR)/facilities.csv
+	$(INTERIM_DIR)/facilities.csv \
+	$(FACILITY_GEOCODE_OVERRIDES)
 	$(PYTHON) $< --facilities "$(INTERIM_DIR)/facilities.csv" \
 		--data-dir "$(DATA_DIR)" \
+		--overrides "$(FACILITY_GEOCODE_OVERRIDES)" \
 		--out "$@" \
 		--log-out "$(BUILD_DIR)/metadata/geocoding_log.csv"
+
+$(FACILITY_GEOCODE_OVERRIDES):
+	mkdir -p "$(dir $@)"
+	printf 'name,위도,경도,manual_address,note\n' > "$@"
 
 $(PROCESSED_DIR)/facility_accessibility.csv: \
 	scripts/05_build_facility_accessibility.py \
@@ -131,26 +140,29 @@ geocode-facilities: $(INTERIM_DIR)/facilities_geocoded.csv
 
 facility-accessibility: $(PROCESSED_DIR)/facility_accessibility.csv
 
-recommend-greedy: $(BUILD_DIR)/tables/school_sai_result.csv
+recommend-greedy: $(BUILD_DIR)/tables/school_sai_result.csv $(FACILITY_HUBS)
 	MPLCONFIGDIR=/tmp/matplotlib $(PYTHON) scripts/10_recommend_joint_assignments.py \
 		--budget "$(ASSIGNMENT_BUDGET)" \
 		--radius-km "$(ASSIGNMENT_RADIUS_KM)" \
 		--weak-quantile "$(WEAK_QUANTILE)" \
-		--max-subjects-per-domain "$(MAX_SUBJECTS_PER_DOMAIN)"
+		--max-subjects-per-domain "$(MAX_SUBJECTS_PER_DOMAIN)" \
+		$(FACILITY_HUBS_ARG)
 
-recommend-rl: $(BUILD_DIR)/tables/school_sai_result.csv
+recommend-rl: $(BUILD_DIR)/tables/school_sai_result.csv $(FACILITY_HUBS)
 	MPLCONFIGDIR=/tmp/matplotlib $(PYTHON) scripts/11_train_rl_assignments.py \
 		--budget "$(ASSIGNMENT_BUDGET)" \
 		--radius-km "$(ASSIGNMENT_RADIUS_KM)" \
 		--weak-quantile "$(WEAK_QUANTILE)" \
-		--max-subjects-per-domain "$(MAX_SUBJECTS_PER_DOMAIN)"
+		--max-subjects-per-domain "$(MAX_SUBJECTS_PER_DOMAIN)" \
+		$(FACILITY_HUBS_ARG)
 
-recommend-actor-critic: $(BUILD_DIR)/tables/school_sai_result.csv
+recommend-actor-critic: $(BUILD_DIR)/tables/school_sai_result.csv $(FACILITY_HUBS)
 	MPLCONFIGDIR=/tmp/matplotlib $(PYTHON) scripts/12_train_actor_critic_assignments.py \
 		--budget "$(ASSIGNMENT_BUDGET)" \
 		--radius-km "$(ASSIGNMENT_RADIUS_KM)" \
 		--weak-quantile "$(WEAK_QUANTILE)" \
-		--max-subjects-per-domain "$(MAX_SUBJECTS_PER_DOMAIN)"
+		--max-subjects-per-domain "$(MAX_SUBJECTS_PER_DOMAIN)" \
+		$(FACILITY_HUBS_ARG)
 
 $(INTERIM_DIR)/joint_curriculum.csv: \
 	scripts/04_prepare_joint_curriculum.py \

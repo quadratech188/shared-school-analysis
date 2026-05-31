@@ -6,14 +6,14 @@ import pandas as pd
 
 from coursemap.actor_critic_assignments import PolicyConfig, train_policy
 from coursemap.assignment_reporting import assignment_rows, existing_pairs, load_domain_matrix, summarize_sai
-from coursemap.assignments import IncrementalAssignmentSimulator, build_candidates, domain_shortage_pairs, greedy_select, school_subject_sets, subject_catalog
+from coursemap.assignments import IncrementalAssignmentSimulator, build_candidates, build_hub_table, domain_shortage_pairs, greedy_select, school_subject_sets, subject_catalog
 from coursemap.io import read_csv_smart, write_csv
 from coursemap.plots import save_before_after_dot_plot
 from coursemap.sai import regular_offerings
 
 
-def selection_key(selected: list[dict]) -> tuple[tuple[str, str, str], ...]:
-    return tuple(sorted((x["hub"], x.get("subject", x["domain"]), x["domain"]) for x in selected))
+def selection_key(selected: list[dict]) -> tuple[tuple[str, str, str, str], ...]:
+    return tuple(sorted((x["hub"], x.get("hub_type", "고등학교"), x.get("subject", x["domain"]), x["domain"]) for x in selected))
 
 
 def make_incremental_reward_fn(simulator: IncrementalAssignmentSimulator, weak: pd.DataFrame):
@@ -96,6 +96,8 @@ def main() -> None:
     parser.add_argument("--radius-km", type=float, default=5.0)
     parser.add_argument("--weak-quantile", type=float, default=0.4)
     parser.add_argument("--max-subjects-per-domain", type=int, default=8)
+    parser.add_argument("--facility-hubs", default="")
+    parser.add_argument("--facility-special-subject-keywords", default="실험,실습,체육,음악,미술,공연,디자인,공예,영상")
     parser.add_argument("--episodes", type=int, default=300)
     parser.add_argument("--learning-rate", type=float, default=0.003)
     parser.add_argument("--entropy-weight", type=float, default=0.03)
@@ -110,10 +112,13 @@ def main() -> None:
     args = parser.parse_args()
 
     features = read_csv_smart(Path(args.features))
+    facilities = read_csv_smart(Path(args.facility_hubs)) if args.facility_hubs else pd.DataFrame()
+    hubs = build_hub_table(features, facilities)
     sai = read_csv_smart(Path(args.sai))
     offerings = regular_offerings(read_csv_smart(Path(args.neis_subjects)))
     domain_matrix = load_domain_matrix(Path(args.domain_supply))
     weak, shortage_pairs = domain_shortage_pairs(sai, domain_matrix, args.weak_quantile)
+    special_keywords = [x.strip() for x in args.facility_special_subject_keywords.split(",") if x.strip()]
     candidates = build_candidates(
         features,
         weak,
@@ -122,6 +127,8 @@ def main() -> None:
         args.radius_km,
         subjects_by_domain=subject_catalog(offerings, args.max_subjects_per_domain),
         existing_school_subjects=school_subject_sets(offerings),
+        hubs=hubs,
+        facility_special_subject_keywords=special_keywords,
     )
     if not candidates:
         raise SystemExit("no assignment candidates")
@@ -135,7 +142,7 @@ def main() -> None:
         hidden_dim=args.hidden_dim,
         seed=args.seed,
     )
-    simulator = IncrementalAssignmentSimulator(features, offerings, args.radius_km)
+    simulator = IncrementalAssignmentSimulator(features, offerings, args.radius_km, hubs=hubs)
     reward_fn = make_incremental_reward_fn(simulator, weak)
     selected, train_log, _model = train_policy(candidates, reward_fn, args.budget, len(weak), len(shortage_pairs), args.radius_km, config)
     greedy_selected = greedy_select(candidates, args.budget)

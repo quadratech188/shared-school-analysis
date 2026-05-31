@@ -25,19 +25,27 @@ def main() -> None:
     parser.add_argument("--facilities", required=True)
     parser.add_argument("--data-dir", default="data/raw")
     parser.add_argument("--kakao-key-file")
+    parser.add_argument("--overrides", default="config/facility_geocode_overrides.csv")
     parser.add_argument("--out", required=True)
     parser.add_argument("--log-out", required=True)
     parser.add_argument("--sleep-seconds", type=float, default=0.12)
     args = parser.parse_args()
 
     facilities = read_csv_smart(Path(args.facilities))
+    override_path = Path(args.overrides)
+    overrides = read_csv_smart(override_path) if override_path.exists() else None
     key = resolve_key(Path(args.data_dir), args.kakao_key_file)
-    geocoded, log = geocode_facilities(facilities, key, sleep_seconds=args.sleep_seconds)
+    geocoded, log = geocode_facilities(facilities, key, sleep_seconds=args.sleep_seconds, overrides=overrides)
     failures = geocoded[geocoded["위도"].isna() | geocoded["경도"].isna()]
     if not failures.empty:
         write_csv(log, Path(args.log_out))
-        names = failures[["facility_type", "name", "address"]].to_dict("records")
-        raise SystemExit(f"facility geocoding failed for {len(failures)} rows: {names}")
+        failure_log = log[log["method"].eq("실패")].copy()
+        failure_cols = ["source", "name", "road", "jibun", "failure_reason", "attempts"]
+        detail = failure_log[failure_cols].to_dict("records")
+        raise SystemExit(
+            f"facility geocoding failed for {len(failures)} rows. "
+            f"See {args.log_out} for full log. Failures: {detail}"
+        )
     write_csv(geocoded, Path(args.out))
     write_csv(log, Path(args.log_out))
     print(f"facility geocoding: {len(geocoded)} rows, success rate 100%")

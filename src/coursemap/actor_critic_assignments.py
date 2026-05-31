@@ -62,7 +62,7 @@ def materialize_selection(selected: list[dict]) -> list[dict]:
 
 
 def available_candidates(candidates: list[dict], selected: list[dict]) -> list[dict]:
-    used = {(x["hub"], x["domain"]) for x in selected}
+    used = {(x["hub"], x.get("hub_type", "고등학교"), x["domain"]) for x in selected}
     covered = {
         (x["school"], x["domain"])
         for item in materialize_selection(selected)
@@ -70,7 +70,7 @@ def available_candidates(candidates: list[dict], selected: list[dict]) -> list[d
     }
     out = []
     for cand in candidates:
-        if (cand["hub"], cand["domain"]) in used:
+        if (cand["hub"], cand.get("hub_type", "고등학교"), cand["domain"]) in used:
             continue
         marginal = [x for x in cand["covered"] if (x["school"], x["domain"]) not in covered]
         if marginal:

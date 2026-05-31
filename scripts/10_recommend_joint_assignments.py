@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 
 from coursemap.assignment_reporting import assignment_rows, existing_pairs, load_domain_matrix, summarize_sai
-from coursemap.assignments import build_candidates, domain_shortage_pairs, greedy_select, school_subject_sets, simulate_assignments, subject_catalog
+from coursemap.assignments import build_candidates, build_hub_table, domain_shortage_pairs, greedy_select, school_subject_sets, simulate_assignments, subject_catalog
 from coursemap.io import read_csv_smart
 from coursemap.plots import save_before_after_dot_plot
 from coursemap.sai import regular_offerings
@@ -60,13 +60,18 @@ def main() -> None:
     parser.add_argument("--radius-km", type=float, default=5.0)
     parser.add_argument("--weak-quantile", type=float, default=0.4)
     parser.add_argument("--max-subjects-per-domain", type=int, default=8)
+    parser.add_argument("--facility-hubs", default="")
+    parser.add_argument("--facility-special-subject-keywords", default="실험,실습,체육,음악,미술,공연,디자인,공예,영상")
     args = parser.parse_args()
 
     features = read_csv_smart(Path(args.features))
+    facilities = read_csv_smart(Path(args.facility_hubs)) if args.facility_hubs else pd.DataFrame()
+    hubs = build_hub_table(features, facilities)
     sai = read_csv_smart(Path(args.sai))
     offerings = regular_offerings(read_csv_smart(Path(args.neis_subjects)))
     domain_matrix = load_domain_matrix(Path(args.domain_supply))
     weak, shortage_pairs = domain_shortage_pairs(sai, domain_matrix, args.weak_quantile)
+    special_keywords = [x.strip() for x in args.facility_special_subject_keywords.split(",") if x.strip()]
     candidates = build_candidates(
         features,
         weak,
@@ -75,11 +80,13 @@ def main() -> None:
         args.radius_km,
         subjects_by_domain=subject_catalog(offerings, args.max_subjects_per_domain),
         existing_school_subjects=school_subject_sets(offerings),
+        hubs=hubs,
+        facility_special_subject_keywords=special_keywords,
     )
     selected = greedy_select(candidates, args.budget)
 
     print_coverage_summary(selected, weak, shortage_pairs)
-    sim = simulate_assignments(features, selected, args.radius_km, offerings)
+    sim = simulate_assignments(features, selected, args.radius_km, offerings, hubs=hubs)
     print_sai_stats(sim, weak)
     save_before_after_dot_plot(
         sim,

@@ -5,6 +5,22 @@ from coursemap.sai import IncrementalSaiState, assignment_offerings, combine_off
 
 
 DEFAULT_DOMAINS = ["정보·AI", "자연·공학", "진로·융합", "제2외국어·국제", "인문·사회", "예체능"]
+DEFAULT_SPECIAL_SUBJECT_KEYWORDS = [
+    "실험",
+    "실습",
+    "체육",
+    "음악",
+    "미술",
+    "공연",
+    "디자인",
+    "공예",
+    "영상",
+]
+FACILITY_TYPE_LABELS = {
+    "public_library": "공공도서관",
+    "youth_facility": "청소년시설",
+    "lifelong_education": "평생교육시설",
+}
 
 
 def subject_catalog(offerings: pd.DataFrame, max_subjects_per_domain: int = 8) -> dict[str, list[str]]:
@@ -27,6 +43,37 @@ def subject_catalog(offerings: pd.DataFrame, max_subjects_per_domain: int = 8) -
 
 def school_subject_sets(offerings: pd.DataFrame) -> dict[str, set[str]]:
     return offerings.groupby("school")["subject"].apply(lambda s: set(s.astype(str))).to_dict()
+
+
+def build_hub_table(schools: pd.DataFrame, facilities: pd.DataFrame | None = None) -> pd.DataFrame:
+    school_hubs = schools[["학교명", "_norm_name", "위도", "경도"]].copy()
+    school_hubs = school_hubs.rename(columns={"학교명": "hub", "_norm_name": "hub_norm"})
+    school_hubs["hub_type"] = "고등학교"
+
+    if facilities is None or facilities.empty:
+        return school_hubs
+
+    required = {"facility_type", "name", "위도", "경도"}
+    missing = required - set(facilities.columns)
+    if missing:
+        raise ValueError(f"facility hubs missing columns: {sorted(missing)}")
+
+    facility_hubs = facilities.dropna(subset=["위도", "경도"]).copy()
+    facility_hubs = pd.DataFrame({
+        "hub": facility_hubs["name"].fillna("").astype(str).str.strip(),
+        "hub_norm": facility_hubs["name"].fillna("").astype(str).str.strip(),
+        "위도": facility_hubs["위도"],
+        "경도": facility_hubs["경도"],
+        "hub_type": facility_hubs["facility_type"].map(FACILITY_TYPE_LABELS).fillna(facility_hubs["facility_type"]),
+    })
+    facility_hubs = facility_hubs[facility_hubs["hub"].ne("")]
+    return pd.concat([school_hubs, facility_hubs], ignore_index=True)
+
+
+def is_special_facility_subject(subject: str, keywords: list[str] | None = None) -> bool:
+    text = str(subject)
+    active_keywords = DEFAULT_SPECIAL_SUBJECT_KEYWORDS if keywords is None else keywords
+    return any(keyword and keyword in text for keyword in active_keywords)
 
 
 def domain_shortage_pairs(sai: pd.DataFrame, domain_matrix: pd.DataFrame, weak_quantile: float) -> tuple[pd.DataFrame, set[tuple[str, str]]]:
@@ -52,17 +99,22 @@ def build_candidates(
     radius_km: float,
     subjects_by_domain: dict[str, list[str]] | None = None,
     existing_school_subjects: dict[str, set[str]] | None = None,
+    hubs: pd.DataFrame | None = None,
+    facility_special_subject_keywords: list[str] | None = None,
 ) -> list[dict]:
     candidates = []
     weak_by_name = weak.set_index("학교명")
     norm_by_name = schools.set_index("학교명")["_norm_name"].to_dict()
     subjects_by_domain = subjects_by_domain or {domain: [f"공동수업:{domain}"] for domain in DEFAULT_DOMAINS}
     existing_school_subjects = existing_school_subjects or {}
-    for _, hub in schools.iterrows():
+    hubs = hubs if hubs is not None else build_hub_table(schools)
+    for _, hub in hubs.iterrows():
         if pd.isna(hub["위도"]) or pd.isna(hub["경도"]):
             continue
         for domain in DEFAULT_DOMAINS:
             for subject in subjects_by_domain.get(domain, []):
+                if hub.get("hub_type") != "고등학교" and is_special_facility_subject(subject, facility_special_subject_keywords):
+                    continue
                 covered = []
                 for school_name, pair_domain in shortage_pairs:
                     if pair_domain != domain or school_name not in weak_by_name.index:
@@ -87,8 +139,9 @@ def build_candidates(
                 if covered:
                     duplicate = sum(1 for item in covered if (norm_by_name.get(item["school"], ""), domain) in existing)
                     candidates.append({
-                        "hub": hub["학교명"],
-                        "hub_norm": hub["_norm_name"],
+                        "hub": hub["hub"],
+                        "hub_norm": hub["hub_norm"],
+                        "hub_type": hub.get("hub_type", "고등학교"),
                         "domain": domain,
                         "subject": subject,
                         "covered": covered,
@@ -105,7 +158,7 @@ def greedy_select(candidates: list[dict], budget: int) -> list[dict]:
         best = None
         best_gain = 0
         for cand in candidates:
-            key = (cand["hub"], cand["domain"])
+            key = (cand["hub"], cand.get("hub_type", "고등학교"), cand["domain"])
             if key in used_hub_domains:
                 continue
             marginal = [item for item in cand["covered"] if (item["school"], item["domain"]) not in covered_pairs]
@@ -118,14 +171,20 @@ def greedy_select(candidates: list[dict], budget: int) -> list[dict]:
         if best is None:
             break
         selected.append(best)
-        used_hub_domains.add((best["hub"], best["domain"]))
+        used_hub_domains.add((best["hub"], best.get("hub_type", "고등학교"), best["domain"]))
         for item in best["marginal"]:
             covered_pairs.add((item["school"], item["domain"]))
     return selected
 
 
 class IncrementalAssignmentSimulator:
-    def __init__(self, features: pd.DataFrame, baseline_offerings: pd.DataFrame, radius_km: float) -> None:
+    def __init__(
+        self,
+        features: pd.DataFrame,
+        baseline_offerings: pd.DataFrame,
+        radius_km: float,
+        hubs: pd.DataFrame | None = None,
+    ) -> None:
         self.features = features
         self.baseline_offerings = baseline_offerings
         self.radius_km = radius_km
@@ -134,7 +193,7 @@ class IncrementalAssignmentSimulator:
         self.before_sai = baseline_scores.set_index("학교명")["SAI"].to_dict()
         self.before_scored = baseline_scores.rename(columns={"SAI": "SAI_before"})
         self.schools = features[["학교명", "위도", "경도"]].copy()
-        self.hubs = self.schools.set_index("학교명")
+        self.hubs = (hubs if hubs is not None else build_hub_table(features)).set_index("hub")
         self.recipient_cache: dict[tuple[str, str, str], list[tuple[str, float]]] = {}
 
     def recipients(self, assignment: dict) -> list[tuple[str, float]]:
@@ -205,5 +264,6 @@ def simulate_assignments(
     selected: list[dict],
     radius_km: float,
     baseline_offerings: pd.DataFrame,
+    hubs: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
-    return IncrementalAssignmentSimulator(features, baseline_offerings, radius_km).simulate(selected)
+    return IncrementalAssignmentSimulator(features, baseline_offerings, radius_km, hubs=hubs).simulate(selected)
